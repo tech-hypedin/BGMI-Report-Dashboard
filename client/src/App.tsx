@@ -454,39 +454,6 @@ async function downloadDoc(rows: Row[], season: SeasonValue, taskValue: string, 
         )
       );
     }
-
-    // Task-wise submission counts (reuses the per-task data fetched above)
-    const taskCounts = taskData.map((t) => ({
-      season: t.season,
-      label: t.label,
-      count: t.ok ? t.rows.length : (null as number | null),
-      links: t.rows.reduce((n, r) => n + r.links.length, 0),
-    }));
-
-    sections.push(para("TASK-WISE SUBMISSIONS", { bold: true, size: 24 }));
-    seasonNumbers.forEach((s) => {
-      const items = taskCounts.filter((t) => t.season === s);
-      const seasonTotal = items.reduce((n, t) => n + (t.count ?? 0), 0);
-      const seasonLinks = items.reduce((n, t) => n + t.links, 0);
-      const taskText = items
-        .map(
-          (t) =>
-            `${t.label} (${
-              t.count === null
-                ? "count unavailable"
-                : `${plural(t.count, "submission")} and ${plural(t.links, "link")}`
-            })`
-        )
-        .join(", ");
-      sections.push(
-        body(
-          `In Season ${s} of the BGMI Campus MVP Program, ${plural(seasonTotal, "submission")} with ${plural(
-            seasonLinks,
-            "proof link"
-          )} ${seasonTotal === 1 ? "was" : "were"} received across ${plural(items.length, "task")}. Task by task: ${taskText}.`
-        )
-      );
-    });
   }
 
   /* ---------- task-wise details: bullets + IGN / UID / College / Links ---------- */
