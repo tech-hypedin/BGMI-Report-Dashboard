@@ -261,8 +261,8 @@ function downloadCsv(rows: Row[], fileLabel: string) {
   URL.revokeObjectURL(url);
 }
 
-// Builds a Word report written as numeric paragraphs (no per-submission entries)
-async function downloadDoc(rows: Row[], season: SeasonValue, scopeLabel: string) {
+// Builds a Word report written as numeric paragraphs, plus task-wise details
+async function downloadDoc(rows: Row[], season: SeasonValue, taskValue: string, scopeLabel: string) {
   const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
   const para = (text: string, opts: { bold?: boolean; size?: number; color?: string } = {}) =>
@@ -275,6 +275,14 @@ async function downloadDoc(rows: Row[], season: SeasonValue, scopeLabel: string)
   const body = (text: string) =>
     new Paragraph({
       spacing: { after: 160, line: 300 },
+      children: [new TextRun({ text, size: 22 })],
+    });
+
+  // Bullet point line
+  const bullet = (text: string) =>
+    new Paragraph({
+      bullet: { level: 0 },
+      spacing: { after: 40 },
       children: [new TextRun({ text, size: 22 })],
     });
 
@@ -343,6 +351,30 @@ async function downloadDoc(rows: Row[], season: SeasonValue, scopeLabel: string)
     body(linkSummary),
   ];
 
+  /* ---------- per-task data (one request per task in scope) ---------- */
+  const seasonNumbers: SeasonNumber[] = [1, 2, 3];
+  const scopeTasks = seasonNumbers
+    .filter((s) => season === "all" || s === season)
+    .flatMap((s) =>
+      TASKS_BY_SEASON[s]
+        .filter((t) => season === "all" || taskValue === ALL_TASKS || t.value === taskValue)
+        .map((t) => ({ season: s, label: t.label, value: t.value }))
+    );
+
+  const taskData = await Promise.all(
+    scopeTasks.map(async (t) => {
+      try {
+        const { data } = await axios.get<SubmissionDetailsResponse>(API_URL, {
+          params: { taskId: t.value },
+        });
+        if (!data?.success) return { ...t, ok: false, rows: [] as Row[] };
+        return { ...t, ok: true, rows: buildRows(data.ambassadors ?? [], data.submissions ?? []) };
+      } catch {
+        return { ...t, ok: false, rows: [] as Row[] };
+      }
+    })
+  );
+
   // Extra details only for All Seasons (all tasks): month-wise submissions based on createdAt
   if (season === "all") {
     const monthMap = new Map<number, { label: string; count: number }>();
@@ -395,29 +427,13 @@ async function downloadDoc(rows: Row[], season: SeasonValue, scopeLabel: string)
       );
     }
 
-    // Task-wise submission counts (one request per task, since "All Seasons" rows carry no task info)
-    const seasonNumbers: SeasonNumber[] = [1, 2, 3];
-    const taskCounts = await Promise.all(
-      seasonNumbers.flatMap((s) =>
-        TASKS_BY_SEASON[s].map(async (t) => {
-          try {
-            const { data } = await axios.get<SubmissionDetailsResponse>(API_URL, {
-              params: { taskId: t.value },
-            });
-            if (!data?.success) return { season: s, label: t.label, count: null as number | null, links: 0 };
-            const subs = data.submissions ?? [];
-            const links = subs.reduce(
-              (n, sub) =>
-                n + (sub.proofUrls ?? []).filter((u) => typeof u === "string" && u.trim().length > 0).length,
-              0
-            );
-            return { season: s, label: t.label, count: subs.length as number | null, links };
-          } catch {
-            return { season: s, label: t.label, count: null as number | null, links: 0 };
-          }
-        })
-      )
-    );
+    // Task-wise submission counts (reuses the per-task data fetched above)
+    const taskCounts = taskData.map((t) => ({
+      season: t.season,
+      label: t.label,
+      count: t.ok ? t.rows.length : (null as number | null),
+      links: t.rows.reduce((n, r) => n + r.links.length, 0),
+    }));
 
     sections.push(para("TASK-WISE SUBMISSIONS", { bold: true, size: 24 }));
     seasonNumbers.forEach((s) => {
@@ -444,6 +460,35 @@ async function downloadDoc(rows: Row[], season: SeasonValue, scopeLabel: string)
       );
     });
   }
+
+  /* ---------- task-wise details: bullets + IGN / UID / College / Links ---------- */
+  sections.push(para("TASK-WISE DETAILS", { bold: true, size: 24 }));
+  taskData.forEach((t) => {
+    sections.push(para(t.label, { bold: true, size: 23 }));
+
+    if (!t.ok) {
+      sections.push(body("Data could not be loaded for this task."));
+      return;
+    }
+
+    const taskLinkCount = t.rows.reduce((n, r) => n + r.links.length, 0);
+    sections.push(
+      bullet(`Number of submissions: ${t.rows.length}`),
+      bullet(`Number of links: ${taskLinkCount}`),
+      new Paragraph({ spacing: { after: 80 }, children: [] })
+    );
+
+    t.rows.forEach((r, i) => {
+      sections.push(
+        para(`Submission ${i + 1}`, { bold: true }),
+        field("IGN", r.ign),
+        field("UID", r.uid),
+        field("College Name", r.collegeName),
+        field("Links", r.links.length === 0 ? "NO LINKS" : r.links.map((l) => l.url).join(", ")),
+        new Paragraph({ spacing: { after: 100 }, children: [] })
+      );
+    });
+  });
 
   const now = new Date();
 
@@ -865,7 +910,7 @@ export default function App() {
               <button
                 type="button"
                 title="Download Word report"
-                onClick={() => downloadDoc(filtered, season, scopeLabel)}
+                onClick={() => downloadDoc(filtered, season, task, scopeLabel)}
                 disabled={loading || !!error || filtered.length === 0}
                 className="flex h-9 shrink-0 items-center gap-2 border border-zinc-700 px-3 text-xs font-bold tracking-[0.2em] text-amber-400 transition-all hover:border-amber-400 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
