@@ -22,6 +22,7 @@ interface Ambassador {
   _id: string;
   IGN: string;
   UID: string | number;
+  collegeName: string;
 }
 
 interface ApiSubmission {
@@ -52,6 +53,7 @@ interface Row {
   rawDate: string;
   ign: string;
   uid: string;
+  collegeName: string;
   links: SubmissionLink[];
 }
 
@@ -198,6 +200,7 @@ function buildRows(ambassadors: Ambassador[], submissions: ApiSubmission[]): Row
         rawDate: s.createdAt ?? "",
         ign: amb?.IGN ?? "Unknown",
         uid: amb?.UID != null ? String(amb.UID) : "N/A",
+        collegeName: amb?.collegeName ?? "N/A",
         links,
       };
     })
@@ -367,7 +370,7 @@ function SkeletonRows() {
     <>
       {Array.from({ length: 6 }, (_, i) => (
         <tr key={i} className="border-t border-zinc-800/80">
-          {[6, 28, 20, 22, 30].map((w, j) => (
+          {[6, 28, 20, 22, 26, 30].map((w, j) => (
             <td key={j} className="px-5 py-5">
               <div
                 style={{ width: `${w * 4}px`, animationDelay: `${i * 80}ms` }}
@@ -610,6 +613,7 @@ export default function App() {
                   <th className="px-5 py-3">Date</th>
                   <th className="px-5 py-3">IGN</th>
                   <th className="px-5 py-3">UID</th>
+                  <th className="px-5 py-3">College</th>
                   <th className="px-5 py-3">Submission Links</th>
                 </tr>
               </thead>
@@ -668,6 +672,9 @@ export default function App() {
                       </td>
                       <td className="px-5 py-4">
                         <CopyUid uid={r.uid} />
+                      </td>
+                      <td className="px-5 py-4 text-sm font-semibold text-zinc-200">
+                        {r.collegeName}
                       </td>
                       <td className="px-5 py-4">
                         {r.links.length === 0 ? (
