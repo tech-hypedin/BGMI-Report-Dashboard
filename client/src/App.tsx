@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
-import { Document, Packer, Paragraph, TextRun, ExternalHyperlink } from "docx";
+import { Document, Packer, Paragraph, TextRun } from "docx";
 
 /* ============================================================
    API CONFIG
@@ -261,15 +261,21 @@ function downloadCsv(rows: Row[], fileLabel: string) {
   URL.revokeObjectURL(url);
 }
 
-// Builds a plain text-style Word report (paragraphs only, no table)
+// Builds a Word report written as numeric paragraphs (no per-submission entries)
 async function downloadDoc(rows: Row[], season: SeasonValue, scopeLabel: string) {
-  const uniqueAmbassadors = new Set(rows.map((r) => `${r.ign}|${r.uid}`)).size;
-  const totalLinks = rows.reduce((n, r) => n + r.links.length, 0);
+  const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
   const para = (text: string, opts: { bold?: boolean; size?: number; color?: string } = {}) =>
     new Paragraph({
       spacing: { after: 60 },
       children: [new TextRun({ text, size: opts.size ?? 22, bold: opts.bold, color: opts.color })],
+    });
+
+  // Readable body paragraph
+  const body = (text: string) =>
+    new Paragraph({
+      spacing: { after: 160, line: 300 },
+      children: [new TextRun({ text, size: 22 })],
     });
 
   // "Label: value" line with a bold label
@@ -282,39 +288,113 @@ async function downloadDoc(rows: Row[], season: SeasonValue, scopeLabel: string)
       ],
     });
 
-  const linkPara = (l: SubmissionLink, j: number, total: number) =>
-    new Paragraph({
-      spacing: { after: 40 },
-      indent: { left: 360 },
-      children: [
-        new TextRun({ text: `${LINK_STYLE[l.kind].label}${total > 1 ? ` ${j + 1}` : ""}: `, bold: true, size: 20 }),
-        new ExternalHyperlink({
-          link: l.url,
-          children: [new TextRun({ text: l.url, size: 20, color: "0563C1", underline: {} })],
-        }),
-      ],
+  /* ---------- numbers ---------- */
+  const totalSubmissions = rows.length;
+  const uniqueAmbassadors = new Set(rows.map((r) => `${r.ign}|${r.uid}`)).size;
+  const uniqueColleges = new Set(rows.map((r) => r.collegeName).filter((c) => c !== "N/A")).size;
+  const submissionsWithoutLinks = rows.filter((r) => r.links.length === 0).length;
+
+  const isSpreadsheet = (url: string) =>
+    /docs\.google\.com\/spreadsheets|\.(xlsx?|csv)(\?|#|$)/i.test(url);
+
+  // Each link lands in exactly one bucket, so the buckets add up to the total
+  let instagramLinks = 0;
+  let driveLinks = 0;
+  let linkedinLinks = 0;
+  let spreadsheetLinks = 0;
+  let otherLinks = 0;
+
+  rows.forEach((r) =>
+    r.links.forEach((l) => {
+      if (l.kind === "instagram") instagramLinks++;
+      else if (l.kind === "linkedin") linkedinLinks++;
+      else if (isSpreadsheet(l.url)) spreadsheetLinks++;
+      else if (l.kind === "drive") driveLinks++;
+      else otherLinks++;
+    })
+  );
+  const totalLinks = instagramLinks + driveLinks + linkedinLinks + spreadsheetLinks + otherLinks;
+
+  /* ---------- paragraphs ---------- */
+  const overview = `This report summarises the proof submissions received in the BGMI Campus MVP Program, the BGMI Campus Ambassador Program, for ${scopeLabel}. In total, ${plural(
+    totalSubmissions,
+    "submission"
+  )} ${totalSubmissions === 1 ? "was" : "were"} made by ${plural(uniqueAmbassadors, "campus ambassador")} representing ${plural(
+    uniqueColleges,
+    "college"
+  )}.`;
+
+  const linkSummary = `Together, these submissions contain ${plural(totalLinks, "proof link")}: ${plural(
+    instagramLinks,
+    "Instagram link"
+  )}, ${plural(driveLinks, "Google Drive link")}, ${plural(linkedinLinks, "LinkedIn link")}, ${plural(
+    spreadsheetLinks,
+    "spreadsheet link"
+  )} and ${plural(otherLinks, "other link")}. ${
+    submissionsWithoutLinks === 0
+      ? "Every submission includes at least one proof link."
+      : `${plural(submissionsWithoutLinks, "submission")} ${submissionsWithoutLinks === 1 ? "has" : "have"} no proof link attached.`
+  }`;
+
+  const sections: Paragraph[] = [
+    para("OVERVIEW", { bold: true, size: 24 }),
+    body(overview),
+    para("PROOF LINKS", { bold: true, size: 24 }),
+    body(linkSummary),
+  ];
+
+  // Extra details only for All Seasons (all tasks): month-wise submissions based on createdAt
+  if (season === "all") {
+    const monthMap = new Map<number, { label: string; count: number }>();
+    let undated = 0;
+    let first: Date | null = null;
+    let last: Date | null = null;
+
+    rows.forEach((r) => {
+      if (!r.date) {
+        undated++;
+        return;
+      }
+      const key = r.date.getFullYear() * 12 + r.date.getMonth();
+      const entry = monthMap.get(key);
+      if (entry) entry.count++;
+      else
+        monthMap.set(key, {
+          label: r.date.toLocaleDateString("en-IN", { month: "long", year: "numeric" }),
+          count: 1,
+        });
+      if (!first || r.date < first) first = r.date;
+      if (!last || r.date > last) last = r.date;
     });
 
-  const entries = rows.flatMap((r, i) => {
-    const block: Paragraph[] = [
-      new Paragraph({
-        spacing: { before: 240, after: 80 },
-        children: [new TextRun({ text: `Submission ${String(i + 1).padStart(2, "0")}`, bold: true, size: 24 })],
-      }),
-      field("Date", r.date ? `${formatDate(r.date)} ${formatTime(r.date)}` : r.rawDate || "No date"),
-      field("IGN", r.ign),
-      field("UID", r.uid),
-      field("College", r.collegeName),
-    ];
+    // Only months that actually received submissions, oldest to newest
+    const months = [...monthMap.entries()].sort((a, b) => a[0] - b[0]).map(([, m]) => m);
 
-    if (r.links.length === 0) {
-      block.push(field("Submission Links", "NO LINKS"));
-    } else {
-      block.push(para("Submission Links:", { bold: true }));
-      r.links.forEach((l, j) => block.push(linkPara(l, j, r.links.length)));
+    if (months.length > 0) {
+      const peak = months.reduce((best, m) => (m.count > best.count ? m : best), months[0]);
+      const datedTotal = months.reduce((n, m) => n + m.count, 0);
+      const average = Math.round((datedTotal / months.length) * 10) / 10;
+
+      const monthText = months.map((m) => `${m.label} (${plural(m.count, "submission")})`).join(", ");
+
+      sections.push(
+        para("MONTH-WISE SUBMISSIONS", { bold: true, size: 24 }),
+        body(
+          `Across all seasons and all tasks of the BGMI Campus MVP Program, submissions were received in ${plural(
+            months.length,
+            "month"
+          )}. Month by month, the campus ambassadors submitted: ${monthText}.`
+        ),
+        body(
+          `The busiest month was ${peak.label} with ${plural(peak.count, "submission")}, and the program averaged ${average} submissions per active month. The first submission was received on ${formatDate(
+            first as unknown as Date
+          )} and the most recent one on ${formatDate(last as unknown as Date)}.${
+            undated > 0 ? ` ${plural(undated, "submission")} had no valid date and ${undated === 1 ? "is" : "are"} not counted in the monthly figures.` : ""
+          }`
+        )
+      );
     }
-    return block;
-  });
+  }
 
   const now = new Date();
 
@@ -333,13 +413,7 @@ async function downloadDoc(rows: Row[], season: SeasonValue, scopeLabel: string)
           field("Task", scopeLabel),
           field("Generated", `${formatDate(now)} ${formatTime(now)}`),
           new Paragraph({ spacing: { after: 120 }, children: [] }),
-          para("SUMMARY", { bold: true, size: 24 }),
-          field("Submissions", String(rows.length)),
-          field("Ambassadors", String(uniqueAmbassadors)),
-          field("Links", String(totalLinks)),
-          new Paragraph({ spacing: { after: 120 }, children: [] }),
-          para("SQUAD SUBMISSIONS", { bold: true, size: 24 }),
-          ...entries,
+          ...sections,
         ],
       },
     ],
