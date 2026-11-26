@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
-import { Document, Packer, Paragraph, TextRun } from "docx";
+import { Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 
 /* ============================================================
    API CONFIG
@@ -344,7 +344,7 @@ async function downloadDoc(rows: Row[], season: SeasonValue, taskValue: string, 
       : `${plural(submissionsWithoutLinks, "submission")} ${submissionsWithoutLinks === 1 ? "has" : "have"} no proof link attached.`
   }`;
 
-  const sections: Paragraph[] = [
+  const sections: (Paragraph | Table)[] = [
     para("OVERVIEW", { bold: true, size: 24 }),
     body(overview),
     para("PROOF LINKS", { bold: true, size: 24 }),
@@ -478,16 +478,51 @@ async function downloadDoc(rows: Row[], season: SeasonValue, taskValue: string, 
       new Paragraph({ spacing: { after: 80 }, children: [] })
     );
 
-    t.rows.forEach((r, i) => {
-      sections.push(
-        para(`Submission ${i + 1}`, { bold: true }),
-        field("IGN", r.ign),
-        field("UID", r.uid),
-        field("College Name", r.collegeName),
-        field("Links", r.links.length === 0 ? "NO LINKS" : r.links.map((l) => l.url).join(", ")),
-        new Paragraph({ spacing: { after: 100 }, children: [] })
-      );
-    });
+    if (t.rows.length === 0) return;
+
+    // Table cell helper: one paragraph per line inside the cell
+    const cell = (lines: string[], width: number, bold = false) =>
+      new TableCell({
+        width: { size: width, type: WidthType.PERCENTAGE },
+        margins: { top: 60, bottom: 60, left: 80, right: 80 },
+        children: lines.map(
+          (line) =>
+            new Paragraph({
+              spacing: { after: 40 },
+              children: [new TextRun({ text: line, size: 20, bold })],
+            })
+        ),
+      });
+
+    const widths = [6, 18, 16, 25, 35]; // # | IGN | UID | College Name | Links
+
+    sections.push(
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            tableHeader: true,
+            children: ["#", "IGN", "UID", "College Name", "Submission Links"].map((h, k) =>
+              cell([h], widths[k], true)
+            ),
+          }),
+          ...t.rows.map(
+            (r, i) =>
+              new TableRow({
+                cantSplit: true,
+                children: [
+                  cell([String(i + 1)], widths[0]),
+                  cell([r.ign], widths[1]),
+                  cell([r.uid], widths[2]),
+                  cell([r.collegeName], widths[3]),
+                  cell(r.links.length === 0 ? ["NO LINKS"] : r.links.map((l) => l.url), widths[4]),
+                ],
+              })
+          ),
+        ],
+      }),
+      new Paragraph({ spacing: { after: 160 }, children: [] })
+    );
   });
 
   const now = new Date();
