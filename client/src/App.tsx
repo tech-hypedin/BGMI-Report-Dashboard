@@ -5,7 +5,7 @@ import axios from "axios";
    API CONFIG
    ============================================================ */
 const API_URL: string =
-  import.meta.env.VITE_API_URL ?? "http://hypedin-BGMI_backend:3000/api/admin/getSubmissionDetails";
+  import.meta.env.VITE_API_URL ?? "https://bgmicampusmvp.com/api/admin/getSubmissionDetails";
 
 /* ============================================================
    TYPES
