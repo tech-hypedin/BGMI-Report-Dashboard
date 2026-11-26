@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
-import { Document, ExternalHyperlink, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
+import { Document, ExternalHyperlink, Packer, Paragraph, Table, TextRun } from "docx";
 
 /* ============================================================
    API CONFIG
@@ -143,10 +143,17 @@ const TASKS_BY_SEASON: Record<SeasonNumber, Option<string>[]> = {
 
 const DEFAULT_SEASON: SeasonNumber = 3;
 
-// Season 1 & 2 tasks: the Word report shows this spreadsheet link instead of the submissions table
+// Spreadsheet links used by the Word report (shown once per season instead of tables)
 const SHEET_LINKS: Partial<Record<SeasonNumber, string>> = {
   1: "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=1965542281#gid=1965542281",
   2: "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=2031594151#gid=2031594151",
+  3: "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=146651924#gid=146651924",
+};
+
+const SHEET_LINK_LABEL: Record<SeasonNumber, string> = {
+  1: "Season 1 Tasks Submission Details",
+  2: "Season 2 Submission Details",
+  3: "Season 3 Submission Details",
 };
 
 // taskId → task name, built from the ids stored with every task on the frontend
@@ -484,29 +491,34 @@ async function downloadDoc(rows: Row[], season: SeasonValue, taskValue: string, 
 
   /* ---------- task-wise details: bullets + IGN / UID / College / Links ---------- */
   sections.push(para("TASK-WISE DETAILS", { bold: true, size: 24 }));
-  taskData.forEach((t) => {
-    sections.push(para(t.label, { bold: true, size: 23 }));
+  seasonNumbers.forEach((s) => {
+    const seasonTasks = taskData.filter((t) => t.season === s);
+    if (seasonTasks.length === 0) return;
 
-    if (!t.ok) {
-      sections.push(body("Data could not be loaded for this task."));
-      return;
-    }
+    seasonTasks.forEach((t) => {
+      sections.push(para(t.label, { bold: true, size: 23 }));
 
-    const taskLinkCount = t.rows.reduce((n, r) => n + r.links.length, 0);
-    sections.push(
-      bullet(`Number of submissions: ${t.rows.length}`),
-      bullet(`Number of links: ${taskLinkCount}`),
-      new Paragraph({ spacing: { after: 80 }, children: [] })
-    );
+      if (!t.ok) {
+        sections.push(body("Data could not be loaded for this task."));
+        return;
+      }
 
-    // Season 1 & 2: link to the spreadsheet instead of the submissions table
-    const sheetLink = SHEET_LINKS[t.season];
+      const taskLinkCount = t.rows.reduce((n, r) => n + r.links.length, 0);
+      sections.push(
+        bullet(`Number of submissions: ${t.rows.length}`),
+        bullet(`Number of links: ${taskLinkCount}`),
+        new Paragraph({ spacing: { after: 80 }, children: [] })
+      );
+    });
+
+    // One spreadsheet link for all the tasks of this season
+    const sheetLink = SHEET_LINKS[s];
     if (sheetLink) {
       sections.push(
         new Paragraph({
           spacing: { after: 160 },
           children: [
-            new TextRun({ text: "Submission details: ", bold: true, size: 22 }),
+            new TextRun({ text: `${SHEET_LINK_LABEL[s]}: `, bold: true, size: 22 }),
             new ExternalHyperlink({
               link: sheetLink,
               children: [new TextRun({ text: sheetLink, size: 22, color: "0563C1", underline: {} })],
@@ -514,54 +526,7 @@ async function downloadDoc(rows: Row[], season: SeasonValue, taskValue: string, 
           ],
         })
       );
-      return;
     }
-
-    if (t.rows.length === 0) return;
-
-    // Table cell helper: one paragraph per line inside the cell
-    const cell = (lines: string[], width: number, bold = false) =>
-      new TableCell({
-        width: { size: width, type: WidthType.PERCENTAGE },
-        margins: { top: 60, bottom: 60, left: 80, right: 80 },
-        children: lines.map(
-          (line) =>
-            new Paragraph({
-              spacing: { after: 40 },
-              children: [new TextRun({ text: line, size: 20, bold })],
-            })
-        ),
-      });
-
-    const widths = [6, 18, 16, 25, 35]; // # | IGN | UID | College Name | Links
-
-    sections.push(
-      new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        rows: [
-          new TableRow({
-            tableHeader: true,
-            children: ["#", "IGN", "UID", "College Name", "Submission Links"].map((h, k) =>
-              cell([h], widths[k], true)
-            ),
-          }),
-          ...t.rows.map(
-            (r, i) =>
-              new TableRow({
-                cantSplit: true,
-                children: [
-                  cell([String(i + 1)], widths[0]),
-                  cell([r.ign], widths[1]),
-                  cell([r.uid], widths[2]),
-                  cell([r.collegeName], widths[3]),
-                  cell(r.links.length === 0 ? ["NO LINKS"] : r.links.map((l) => l.url), widths[4]),
-                ],
-              })
-          ),
-        ],
-      }),
-      new Paragraph({ spacing: { after: 160 }, children: [] })
-    );
   });
 
   const now = new Date();
