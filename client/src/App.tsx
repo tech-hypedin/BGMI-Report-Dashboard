@@ -394,6 +394,55 @@ async function downloadDoc(rows: Row[], season: SeasonValue, scopeLabel: string)
         )
       );
     }
+
+    // Task-wise submission counts (one request per task, since "All Seasons" rows carry no task info)
+    const seasonNumbers: SeasonNumber[] = [1, 2, 3];
+    const taskCounts = await Promise.all(
+      seasonNumbers.flatMap((s) =>
+        TASKS_BY_SEASON[s].map(async (t) => {
+          try {
+            const { data } = await axios.get<SubmissionDetailsResponse>(API_URL, {
+              params: { taskId: t.value },
+            });
+            if (!data?.success) return { season: s, label: t.label, count: null as number | null, links: 0 };
+            const subs = data.submissions ?? [];
+            const links = subs.reduce(
+              (n, sub) =>
+                n + (sub.proofUrls ?? []).filter((u) => typeof u === "string" && u.trim().length > 0).length,
+              0
+            );
+            return { season: s, label: t.label, count: subs.length as number | null, links };
+          } catch {
+            return { season: s, label: t.label, count: null as number | null, links: 0 };
+          }
+        })
+      )
+    );
+
+    sections.push(para("TASK-WISE SUBMISSIONS", { bold: true, size: 24 }));
+    seasonNumbers.forEach((s) => {
+      const items = taskCounts.filter((t) => t.season === s);
+      const seasonTotal = items.reduce((n, t) => n + (t.count ?? 0), 0);
+      const seasonLinks = items.reduce((n, t) => n + t.links, 0);
+      const taskText = items
+        .map(
+          (t) =>
+            `${t.label} (${
+              t.count === null
+                ? "count unavailable"
+                : `${plural(t.count, "submission")} and ${plural(t.links, "link")}`
+            })`
+        )
+        .join(", ");
+      sections.push(
+        body(
+          `In Season ${s} of the BGMI Campus MVP Program, ${plural(seasonTotal, "submission")} with ${plural(
+            seasonLinks,
+            "proof link"
+          )} ${seasonTotal === 1 ? "was" : "were"} received across ${plural(items.length, "task")}. Task by task: ${taskText}.`
+        )
+      );
+    });
   }
 
   const now = new Date();
