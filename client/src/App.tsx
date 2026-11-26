@@ -70,34 +70,65 @@ const SEASONS: Option<SeasonValue>[] = [
   { label: "Season 3", value: 3 },
 ];
 
+// const TASKS_BY_SEASON: Record<SeasonValue, Option<string>[]> = {
+//   1: [
+//     { label: "CAPTURE THE CLUTCH - Season 1", value: "s1-capture-the-clutch" },
+//     { label: "LIVIK LOCKDOWN - Week 1 & Week 2(Combined) - Season 1", value: "s1-livik-lockdown-w1-w2" },
+//     { label: "RECRUIT THE SQUAD - Season 1", value: "s1-recruit-the-squad" },
+//     { label: "LIVIK LOCKDOWN - Week 3 - Season 1", value: "s1-livik-lockdown-w3" },
+//     { label: "LIVIK LOCKDOWN - Week 4 - Season 1", value: "s1-livik-lockdown-w4" },
+//     { label: "BOOSTER TASK: COHORT CONNECT - Season 1", value: "s1-booster-cohort-connect" },
+//   ],
+//   2: [
+//     { label: "TDM / WOW BATTLEGROUND (WEEK 1 & 2) - Season 2", value: "s2-tdm-wow-w1-w2" },
+//     { label: "TDM / WOW BATTLEGROUND (WEEK 3 & 4) - Season 2", value: "s2-tdm-wow-w3-w4" },
+//     { label: "CAPTURE THE CLUTCH - Season 2", value: "s2-capture-the-clutch" },
+//     { label: "OFFLINE ACTIVATION - Season 2", value: "s2-offline-activation" },
+//     { label: "BOOSTER — SQUAD SIGNUPS - Season 2", value: "s2-booster-squad-signups" },
+//     { label: "BOOSTER — FLEX - Season 2", value: "s2-booster-flex" },
+//     { label: "Booster Task - Welcome Kit Unboxing Reel - Season 2", value: "s2-booster-unboxing-reel" },
+//     { label: "WOW CHALLENGE - Season 2", value: "s2-wow-challenge" },
+//     { label: "CLUTCH DIARIES - Season 2", value: "s2-clutch-diaries" },
+//   ],
+//   3: [
+//     { label: "Recruit the Squad - Season 3", value: "s3-recruit-the-squad" },
+//     { label: "Custom Classic Matches (Week 1 & 2) - Season 3", value: "s3-custom-classic-w1-w2" },
+//     { label: "Custom Classic Matches (Week 3 & 4) - Season 3", value: "s3-custom-classic-w3-w4" },
+//     { label: "Capture the Clutch - Season 3", value: "s3-capture-the-clutch" },
+//     { label: "BGMI Campus MVP LinkedIn Post - Season 3", value: "s3-linkedin-post" },
+//     { label: "My BGMI MVP Journey (Reel) - Season 3", value: "s3-mvp-journey-reel" },
+//     { label: "Booster: KIARAA SHOWDOWN - Season 3", value: "s3-booster-kiaraa-showdown" },
+//   ],
+// };
+
 const TASKS_BY_SEASON: Record<SeasonValue, Option<string>[]> = {
   1: [
-    { label: "CAPTURE THE CLUTCH - Season 1", value: "s1-capture-the-clutch" },
-    { label: "LIVIK LOCKDOWN - Week 1 & Week 2(Combined) - Season 1", value: "s1-livik-lockdown-w1-w2" },
-    { label: "RECRUIT THE SQUAD - Season 1", value: "s1-recruit-the-squad" },
-    { label: "LIVIK LOCKDOWN - Week 3 - Season 1", value: "s1-livik-lockdown-w3" },
-    { label: "LIVIK LOCKDOWN - Week 4 - Season 1", value: "s1-livik-lockdown-w4" },
-    { label: "BOOSTER TASK: COHORT CONNECT - Season 1", value: "s1-booster-cohort-connect" },
+    { label: "CAPTURE THE CLUTCH - Season 1", value: "6a58c356457bea701ebd218c" },
+    { label: "LIVIK LOCKDOWN - Week 1 & Week 2(Combined) - Season 1", value: "6a58c5dbeedf4fd8e801cef5" },
+    { label: "RECRUIT THE SQUAD - Season 1", value: "6a58c6633e78410396961622" },
+    { label: "LIVIK LOCKDOWN - Week 3 - Season 1", value: "6a7470738fce8ec8fd2e040c" },
+    { label: "LIVIK LOCKDOWN - Week 4 - Season 1", value: "6a7471e839d1c73094a1aa24" },
+    { label: "BOOSTER TASK: COHORT CONNECT - Season 1", value: "6a8d54c2db70a0a21fac09a0" },
   ],
   2: [
-    { label: "TDM / WOW BATTLEGROUND (WEEK 1 & 2) - Season 2", value: "s2-tdm-wow-w1-w2" },
-    { label: "TDM / WOW BATTLEGROUND (WEEK 3 & 4) - Season 2", value: "s2-tdm-wow-w3-w4" },
-    { label: "CAPTURE THE CLUTCH - Season 2", value: "s2-capture-the-clutch" },
-    { label: "OFFLINE ACTIVATION - Season 2", value: "s2-offline-activation" },
-    { label: "BOOSTER — SQUAD SIGNUPS - Season 2", value: "s2-booster-squad-signups" },
-    { label: "BOOSTER — FLEX - Season 2", value: "s2-booster-flex" },
-    { label: "Booster Task - Welcome Kit Unboxing Reel - Season 2", value: "s2-booster-unboxing-reel" },
-    { label: "WOW CHALLENGE - Season 2", value: "s2-wow-challenge" },
-    { label: "CLUTCH DIARIES - Season 2", value: "s2-clutch-diaries" },
+    { label: "TDM / WOW BATTLEGROUND (WEEK 1 & 2) - Season 2", value: "6a9ae1999dc6f5901f1c5960" },
+    { label: "TDM / WOW BATTLEGROUND (WEEK 3 & 4) - Season 2", value: "6a9ae3229dc6f5901f1c5961" },
+    { label: "CAPTURE THE CLUTCH - Season 2", value: "6a9c16f3093c4e366e2e623f" },
+    { label: "OFFLINE ACTIVATION - Season 2", value: "6a9c17bcf4853e9901eeee21" },
+    { label: "BOOSTER — SQUAD SIGNUPS - Season 2", value: "6a9e7644647eb524f1eb84d0" },
+    { label: "BOOSTER — FLEX - Season 2", value: "6aa9274c1b12d592eaa9a62b" },
+    { label: "Booster Task - Welcome Kit Unboxing Reel - Season 2", value: "6ab6969da4803c3c7b1b087c" },
+    { label: "WOW CHALLENGE - Season 2", value: "6ac0d3becfe49cb80aa65d83" },
+    { label: "CLUTCH DIARIES - Season 2", value: "6ac0d9bfc6e5c085e2ee3e9f" },
   ],
   3: [
-    { label: "Recruit the Squad - Season 3", value: "s3-recruit-the-squad" },
-    { label: "Custom Classic Matches (Week 1 & 2) - Season 3", value: "s3-custom-classic-w1-w2" },
-    { label: "Custom Classic Matches (Week 3 & 4) - Season 3", value: "s3-custom-classic-w3-w4" },
-    { label: "Capture the Clutch - Season 3", value: "s3-capture-the-clutch" },
-    { label: "BGMI Campus MVP LinkedIn Post - Season 3", value: "s3-linkedin-post" },
-    { label: "My BGMI MVP Journey (Reel) - Season 3", value: "s3-mvp-journey-reel" },
-    { label: "Booster: KIARAA SHOWDOWN - Season 3", value: "s3-booster-kiaraa-showdown" },
+    { label: "Recruit the Squad - Season 3", value: "6ada5d61889b4b59d6e69bde" },
+    { label: "Custom Classic Matches (Week 1 & 2) - Season 3", value: "6ada5dd23bd322bdfd1b2104" },
+    { label: "Custom Classic Matches (Week 3 & 4) - Season 3", value: "6ada5e2ca4d7536c8254a700" },
+    { label: "Capture the Clutch - Season 3", value: "6ada5e962da30de8da222e18" },
+    { label: "BGMI Campus MVP LinkedIn Post - Season 3", value: "6ada5eeb889b4b59d6e69bdf" },
+    { label: "My BGMI MVP Journey (Reel) - Season 3", value: "6ada5f603bd322bdfd1b2105" },
+    { label: "Booster: KIARAA SHOWDOWN - Season 3", value: "6ae83bbef4a0bf8c4c95e8ec" },
   ],
 };
 
@@ -381,10 +412,10 @@ export default function App() {
     const key = `${season}|${task}|${reloadKey}`;
 
     axios
-      .get<SubmissionDetailsResponse>(API_URL, {
-        params: { season, task }, // selected dropdown values; backend can use these to filter
-        signal: controller.signal,
-      })
+  .get<SubmissionDetailsResponse>(API_URL, {
+    params: { taskId: task }, // task state now holds the task's ID
+    signal: controller.signal,
+  })
       .then(({ data }) => {
         if (!data?.success) {
           setResult({ key, rows: [], error: data?.message || "Request failed." });
@@ -480,13 +511,13 @@ export default function App() {
           </div>
 
           <div className={`animate-[flicker_5s_infinite] border border-zinc-700 bg-zinc-900/70 px-4 py-2 font-mono text-xs text-zinc-400 backdrop-blur ${CUT_CORNERS}`}>
-            <div>
-              SEASON <span className="text-amber-400">{season}</span>
-            </div>
-            <div className="max-w-[16rem] truncate">
-              TASK <span className="text-amber-400">{task}</span>
-            </div>
-          </div>
+  <div>
+    SEASON <span className="text-amber-400">{season}</span>
+  </div>
+  <div className="max-w-[16rem] truncate">
+    TASK <span className="text-amber-400">{selectedTask.label}</span>
+  </div>
+</div>
         </header>
 
         {/* ===== Dropdowns ===== */}
