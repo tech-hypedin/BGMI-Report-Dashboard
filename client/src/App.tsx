@@ -30,6 +30,7 @@ interface Ambassador {
 interface ApiSubmission {
   _id: string;
   ambassadorId: string | { _id: string }; // handles both plain id and populated doc
+  taskId?: string | { _id: string }; // handles both plain id and populated doc
   proofUrls: string[];
   createdAt: string; // e.g. "Sat Oct 24 2026 18:14:23 GMT+0000 (Coordinated Universal Time)"
 }
@@ -56,6 +57,7 @@ interface Row {
   ign: string;
   uid: string;
   collegeName: string;
+  taskName: string;
   links: SubmissionLink[];
 }
 
@@ -141,6 +143,19 @@ const TASKS_BY_SEASON: Record<SeasonNumber, Option<string>[]> = {
 
 const DEFAULT_SEASON: SeasonNumber = 3;
 
+// Season 1 & 2 submissions are shown as a spreadsheet link instead of a table
+const SHEET_LINKS: Partial<Record<SeasonNumber, string>> = {
+  1: "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=1965542281#gid=1965542281",
+  2: "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=2031594151#gid=2031594151",
+};
+
+// taskId → task name, built from the ids stored with every task on the frontend
+const TASK_NAME_BY_ID = new Map<string, string>(
+  Object.values(TASKS_BY_SEASON)
+    .flat()
+    .map((t): [string, string] => [t.value, t.label])
+);
+
 // "All Tasks" always comes first; with "All Seasons" it is the only option
 function getTaskOptions(season: SeasonValue): Option<string>[] {
   const allTasks: Option<string> = { label: "All Tasks", value: ALL_TASKS };
@@ -191,6 +206,10 @@ function getAmbassadorId(ref: ApiSubmission["ambassadorId"]): string {
   return typeof ref === "string" ? ref : ref?._id ?? "";
 }
 
+function getTaskId(ref: ApiSubmission["taskId"]): string {
+  return typeof ref === "string" ? ref : ref?._id ?? "";
+}
+
 // Join submissions → ambassadors via submissions[].ambassadorId === ambassadors[]._id
 function buildRows(ambassadors: Ambassador[], submissions: ApiSubmission[]): Row[] {
   const byId = new Map(ambassadors.map((a) => [String(a._id), a]));
@@ -212,6 +231,7 @@ function buildRows(ambassadors: Ambassador[], submissions: ApiSubmission[]): Row
         ign: amb?.IGN ?? "Unknown",
         uid: amb?.UID != null ? String(amb.UID) : "N/A",
         collegeName: amb?.collegeName ?? "N/A",
+        taskName: TASK_NAME_BY_ID.get(getTaskId(s.taskId)) ?? "N/A",
         links,
       };
     })
@@ -235,7 +255,7 @@ function csvCell(value: string | number): string {
 
 // Builds a CSV that mirrors the table exactly as shown on the page
 function downloadCsv(rows: Row[], fileLabel: string) {
-  const header = ["#", "Date", "IGN", "UID", "College", "Submission Links"];
+  const header = ["#", "Date", "IGN", "UID", "College", "Task", "Submission Links"];
 
   const body = rows.map((r, i) => [
     String(i + 1).padStart(2, "0"),
@@ -244,6 +264,7 @@ function downloadCsv(rows: Row[], fileLabel: string) {
     r.ign,
     r.uid,
     r.collegeName,
+    r.taskName,
     r.links.length === 0 ? "NO LINKS" : r.links.map((l) => l.url).join(" | "),
   ]);
 
@@ -753,6 +774,9 @@ export default function App() {
       ? `All Tasks - Season ${season}`
       : selectedTask.label;
 
+  // Season 1 & 2 show a spreadsheet link instead of the table
+  const sheetUrl = season === "all" ? undefined : SHEET_LINKS[season];
+
   // Every season/task change (or retry) is a new request
   const requestKey = `${season}|${task}|${reloadKey}`;
   const loading = result?.key !== requestKey;
@@ -964,116 +988,135 @@ export default function App() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left">
-              <thead>
-                <tr className="text-[11px] font-bold uppercase tracking-[0.25em] text-amber-400/80">
-                  <th className="px-5 py-3">#</th>
-                  <th className="px-5 py-3">Date</th>
-                  <th className="px-5 py-3">IGN</th>
-                  <th className="px-5 py-3">UID</th>
-                  <th className="px-5 py-3">College</th>
-                  <th className="px-5 py-3">Submission Links</th>
-                </tr>
-              </thead>
-              <tbody key={`rows-${requestKey}`}>
-                {loading && <SkeletonRows />}
-
-                {!loading && error && (
-                  <tr>
-                    <td colSpan={6} className="px-5 py-16 text-center">
-                      <p className="font-['Orbitron',sans-serif] text-lg font-bold tracking-widest text-red-400">
-                        COMMS DOWN
-                      </p>
-                      <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">{error}</p>
-                      <button
-                        type="button"
-                        onClick={() => setReloadKey((k) => k + 1)}
-                        className="mt-5 border border-amber-500/60 px-5 py-2 text-xs font-bold tracking-[0.3em] text-amber-300 transition-all hover:bg-amber-500/15 hover:shadow-[0_0_20px_-6px_rgba(245,166,35,0.8)]"
-                      >
-                        RETRY
-                      </button>
-                    </td>
+          {sheetUrl ? (
+            <div className="px-5 py-16 text-center">
+              <p className="font-['Orbitron',sans-serif] text-lg font-bold tracking-widest text-amber-400">
+                SEASON {season} SUBMISSIONS
+              </p>
+              <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">
+                Submission details for Season {season} are available in the spreadsheet.
+              </p>
+              <a
+                href={sheetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-5 inline-flex items-center gap-2 border border-amber-500/60 px-5 py-2 text-xs font-bold tracking-[0.3em] text-amber-300 transition-all hover:bg-amber-500/15 hover:shadow-[0_0_20px_-6px_rgba(245,166,35,0.8)]"
+              >
+                OPEN SEASON {season} SPREADSHEET <span aria-hidden>↗</span>
+              </a>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left">
+                <thead>
+                  <tr className="text-[11px] font-bold uppercase tracking-[0.25em] text-amber-400/80">
+                    <th className="px-5 py-3">#</th>
+                    <th className="px-5 py-3">Date</th>
+                    <th className="px-5 py-3">IGN</th>
+                    <th className="px-5 py-3">UID</th>
+                    <th className="px-5 py-3">College</th>
+                    <th className="px-5 py-3">Submission Links</th>
                   </tr>
-                )}
+                </thead>
+                <tbody key={`rows-${requestKey}`}>
+                  {loading && <SkeletonRows />}
 
-                {!loading &&
-                  !error &&
-                  filtered.map((r, i) => (
-                    <tr
-                      key={r.id}
-                      className="group border-t border-zinc-800/80 hover:bg-amber-500/[0.07]"
-                    >
-                      <td className="relative px-5 py-4 font-mono text-sm text-zinc-500">
-                        <span className="absolute inset-y-0 left-0 w-0.5 scale-y-0 bg-amber-400 transition-transform duration-300 group-hover:scale-y-100" />
-                        {String(i + 1).padStart(2, "0")}
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="grid h-9 w-9 shrink-0 place-items-center bg-gradient-to-br from-amber-400 to-orange-600 text-xs font-black text-black [clip-path:polygon(50%_0,100%_25%,100%_75%,50%_100%,0_75%,0_25%)]">
-                            {r.date ? r.date.getDate().toString().padStart(2, "0") : "--"}
-                          </div>
-                          {r.date ? (
-                            <div className="leading-tight">
-                              <div className="font-semibold text-zinc-100">{formatDate(r.date)}</div>
-                              <div className="font-mono text-xs text-zinc-500">{formatTime(r.date)}</div>
-                            </div>
-                          ) : (
-                            <span className="text-sm text-zinc-400">{r.rawDate || "No date"}</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-5 py-4">
-                        <span className="inline-block border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 font-mono text-sm font-bold text-amber-300">
-                          {r.ign}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4">
-                        <CopyUid uid={r.uid} />
-                      </td>
-                      <td className="px-5 py-4 text-sm font-semibold text-zinc-200">
-                        {r.collegeName}
-                      </td>
-                      <td className="px-5 py-4">
-                        {r.links.length === 0 ? (
-                          <span className="text-xs font-bold tracking-widest text-zinc-600">NO LINKS</span>
-                        ) : (
-                          <div className="flex flex-wrap gap-2">
-                            {r.links.map((l, j) => (
-                              <a
-                                key={`${l.url}-${j}`}
-                                href={l.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={l.url}
-                                className={`inline-flex items-center gap-1.5 border px-2.5 py-1 text-[11px] font-bold tracking-widest transition-colors ${LINK_STYLE[l.kind].cls}`}
-                              >
-                                {LINK_STYLE[l.kind].label}
-                                {r.links.length > 1 && <span className="opacity-60">{j + 1}</span>}
-                                <span aria-hidden>↗</span>
-                              </a>
-                            ))}
-                          </div>
-                        )}
+                  {!loading && error && (
+                    <tr>
+                      <td colSpan={6} className="px-5 py-16 text-center">
+                        <p className="font-['Orbitron',sans-serif] text-lg font-bold tracking-widest text-red-400">
+                          COMMS DOWN
+                        </p>
+                        <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">{error}</p>
+                        <button
+                          type="button"
+                          onClick={() => setReloadKey((k) => k + 1)}
+                          className="mt-5 border border-amber-500/60 px-5 py-2 text-xs font-bold tracking-[0.3em] text-amber-300 transition-all hover:bg-amber-500/15 hover:shadow-[0_0_20px_-6px_rgba(245,166,35,0.8)]"
+                        >
+                          RETRY
+                        </button>
                       </td>
                     </tr>
-                  ))}
+                  )}
 
-                {!loading && !error && filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="px-5 py-16 text-center">
-                      <p className="font-['Orbitron',sans-serif] text-lg font-bold tracking-widest text-zinc-500">
-                        NO ENEMIES SPOTTED
-                      </p>
-                      <p className="mt-1 text-sm text-zinc-600">
-                        {query ? `No submissions match "${query}".` : "No submissions for this task yet."}
-                      </p>
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                  {!loading &&
+                    !error &&
+                    filtered.map((r, i) => (
+                      <tr
+                        key={r.id}
+                        className="group border-t border-zinc-800/80 hover:bg-amber-500/[0.07]"
+                      >
+                        <td className="relative px-5 py-4 font-mono text-sm text-zinc-500">
+                          <span className="absolute inset-y-0 left-0 w-0.5 scale-y-0 bg-amber-400 transition-transform duration-300 group-hover:scale-y-100" />
+                          {String(i + 1).padStart(2, "0")}
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="grid h-9 w-9 shrink-0 place-items-center bg-gradient-to-br from-amber-400 to-orange-600 text-xs font-black text-black [clip-path:polygon(50%_0,100%_25%,100%_75%,50%_100%,0_75%,0_25%)]">
+                              {r.date ? r.date.getDate().toString().padStart(2, "0") : "--"}
+                            </div>
+                            {r.date ? (
+                              <div className="leading-tight">
+                                <div className="font-semibold text-zinc-100">{formatDate(r.date)}</div>
+                                <div className="font-mono text-xs text-zinc-500">{formatTime(r.date)}</div>
+                              </div>
+                            ) : (
+                              <span className="text-sm text-zinc-400">{r.rawDate || "No date"}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <span className="inline-block border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 font-mono text-sm font-bold text-amber-300">
+                            {r.ign}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4">
+                          <CopyUid uid={r.uid} />
+                        </td>
+                        <td className="px-5 py-4 text-sm font-semibold text-zinc-200">
+                          {r.collegeName}
+                        </td>
+                        <td className="px-5 py-4">
+                          {r.links.length === 0 ? (
+                            <span className="text-xs font-bold tracking-widest text-zinc-600">NO LINKS</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {r.links.map((l, j) => (
+                                <a
+                                  key={`${l.url}-${j}`}
+                                  href={l.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={l.url}
+                                  className={`inline-flex items-center gap-1.5 border px-2.5 py-1 text-[11px] font-bold tracking-widest transition-colors ${LINK_STYLE[l.kind].cls}`}
+                                >
+                                  {LINK_STYLE[l.kind].label}
+                                  {r.links.length > 1 && <span className="opacity-60">{j + 1}</span>}
+                                  <span aria-hidden>↗</span>
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+
+                  {!loading && !error && filtered.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-5 py-16 text-center">
+                        <p className="font-['Orbitron',sans-serif] text-lg font-bold tracking-widest text-zinc-500">
+                          NO ENEMIES SPOTTED
+                        </p>
+                        <p className="mt-1 text-sm text-zinc-600">
+                          {query ? `No submissions match "${query}".` : "No submissions for this task yet."}
+                        </p>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
         <footer className="mt-8 flex items-center justify-between text-[11px] font-bold tracking-[0.3em] text-zinc-600">
