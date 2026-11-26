@@ -567,11 +567,13 @@ export default function App() {
     const controller = new AbortController();
     const key = `${season}|${task}|${reloadKey}`;
 
-    // All Seasons → no params at all
+    // All Seasons → scope=all seasons
     // All Tasks (one season) → every taskId of that season
     // Otherwise → the single selected taskId
     const params = new URLSearchParams();
-    if (season !== "all") {
+    if (season === "all") {
+      params.append("scope", "all seasons");
+    } else {
       const taskIds = task === ALL_TASKS ? TASKS_BY_SEASON[season].map((t) => t.value) : [task];
       taskIds.forEach((id) => params.append("taskId", id));
     }
