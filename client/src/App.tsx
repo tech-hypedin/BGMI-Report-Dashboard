@@ -61,6 +61,12 @@ interface Row {
   links: SubmissionLink[];
 }
 
+// "YYYY-MM-DD" from the date inputs; an empty string means that side is not set
+interface DateRange {
+  from: string;
+  to: string;
+}
+
 interface FetchResult {
   key: string;
   rows: Row[];
@@ -142,6 +148,8 @@ const TASKS_BY_SEASON: Record<SeasonNumber, Option<string>[]> = {
 };
 
 const DEFAULT_SEASON: SeasonNumber = 3;
+
+const NO_DATE_RANGE: DateRange = { from: "", to: "" };
 
 // Spreadsheet links used by the Word report (shown once per season instead of tables)
 const SHEET_LINKS: Partial<Record<SeasonNumber, string>> = {
@@ -245,6 +253,15 @@ function buildRows(ambassadors: Ambassador[], submissions: ApiSubmission[]): Row
     .sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0)); // newest first
 }
 
+// Keeps rows between the start and end date (both days included, in local time).
+// With no date selected, every row is returned. Undated rows never match a range.
+function filterByDateRange(rows: Row[], { from, to }: DateRange): Row[] {
+  if (!from && !to) return rows;
+  const start = from ? new Date(`${from}T00:00:00`).getTime() : -Infinity;
+  const end = to ? new Date(`${to}T23:59:59.999`).getTime() : Infinity;
+  return rows.filter((r) => r.date !== null && r.date.getTime() >= start && r.date.getTime() <= end);
+}
+
 function getErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
     const apiMessage = (err.response?.data as { message?: string } | undefined)?.message;
@@ -290,7 +307,13 @@ function downloadCsv(rows: Row[], fileLabel: string) {
 }
 
 // Builds a Word report written as numeric paragraphs, plus task-wise details
-async function downloadDoc(rows: Row[], season: SeasonValue, taskValue: string, scopeLabel: string) {
+async function downloadDoc(
+  rows: Row[],
+  season: SeasonValue,
+  taskValue: string,
+  scopeLabel: string,
+  dateRange: DateRange
+) {
   const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
   const para = (text: string, opts: { bold?: boolean; size?: number; color?: string } = {}) =>
@@ -396,7 +419,8 @@ async function downloadDoc(rows: Row[], season: SeasonValue, taskValue: string, 
           params: { taskId: t.value },
         });
         if (!data?.success) return { ...t, ok: false, rows: [] as Row[] };
-        return { ...t, ok: true, rows: buildRows(data.ambassadors ?? [], data.submissions ?? []) };
+        const taskRows = buildRows(data.ambassadors ?? [], data.submissions ?? []);
+        return { ...t, ok: true, rows: filterByDateRange(taskRows, dateRange) };
       } catch {
         return { ...t, ok: false, rows: [] as Row[] };
       }
@@ -710,6 +734,7 @@ export default function App() {
   const [season, setSeason] = useState<SeasonValue>(DEFAULT_SEASON);
   const [task, setTask] = useState<string>(TASKS_BY_SEASON[DEFAULT_SEASON][0].value);
   const [query, setQuery] = useState("");
+  const [dateRange, setDateRange] = useState<DateRange>(NO_DATE_RANGE);
   const [reloadKey, setReloadKey] = useState(0);
   const [result, setResult] = useState<FetchResult | null>(null);
 
@@ -772,18 +797,21 @@ export default function App() {
     return () => controller.abort();
   }, [season, task, reloadKey]);
 
+  const hasDateRange = Boolean(dateRange.from || dateRange.to);
+  const rangedRows = useMemo(() => filterByDateRange(rows, dateRange), [rows, dateRange]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
+    if (!q) return rangedRows;
+    return rangedRows.filter((r) =>
       [r.ign, r.uid, r.date ? `${formatDate(r.date)} ${formatTime(r.date)}` : r.rawDate].some((f) =>
         f.toLowerCase().includes(q)
       )
     );
-  }, [rows, query]);
+  }, [rangedRows, query]);
 
-  const uniqueAmbassadors = new Set(rows.map((r) => `${r.ign}|${r.uid}`)).size;
-  const totalLinks = rows.reduce((n, r) => n + r.links.length, 0);
+  const uniqueAmbassadors = new Set(rangedRows.map((r) => `${r.ign}|${r.uid}`)).size;
+  const totalLinks = rangedRows.reduce((n, r) => n + r.links.length, 0);
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[#07080a] font-['Rajdhani',sans-serif] text-zinc-100 selection:bg-amber-400 selection:text-black">
@@ -855,6 +883,50 @@ export default function App() {
             value={task}
             onChange={setTask}
           />
+
+          {/* Date range (optional) */}
+          <div className="md:col-span-2">
+            <div className="mb-2 flex items-center gap-2 text-[11px] font-bold tracking-[0.3em] text-amber-400/80">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+              03 <span className="text-zinc-500">//</span> <span className="text-zinc-300">Select Date Range</span>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <label className="flex flex-1 flex-col gap-1 text-xs font-bold uppercase tracking-widest text-zinc-500">
+                Start Date
+                <input
+                  type="date"
+                  value={dateRange.from}
+                  max={dateRange.to || undefined}
+                  onChange={(e) => {
+                    const from = e.target.value;
+                    setDateRange((r) => ({ ...r, from }));
+                  }}
+                  className="w-full border border-amber-500/40 bg-zinc-900/80 px-4 py-2.5 text-sm font-semibold text-zinc-100 [color-scheme:dark] focus:border-amber-400 focus:outline-none"
+                />
+              </label>
+              <label className="flex flex-1 flex-col gap-1 text-xs font-bold uppercase tracking-widest text-zinc-500">
+                End Date
+                <input
+                  type="date"
+                  value={dateRange.to}
+                  min={dateRange.from || undefined}
+                  onChange={(e) => {
+                    const to = e.target.value;
+                    setDateRange((r) => ({ ...r, to }));
+                  }}
+                  className="w-full border border-amber-500/40 bg-zinc-900/80 px-4 py-2.5 text-sm font-semibold text-zinc-100 [color-scheme:dark] focus:border-amber-400 focus:outline-none"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => setDateRange(NO_DATE_RANGE)}
+                disabled={!hasDateRange}
+                className="h-[42px] shrink-0 border border-zinc-700 px-4 text-xs font-bold tracking-[0.2em] text-amber-400 transition-all hover:border-amber-400 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                CLEAR
+              </button>
+            </div>
+          </div>
         </section>
 
         {/* ===== Mission banner ===== */}
@@ -875,7 +947,7 @@ export default function App() {
 
         {/* ===== Stats ===== */}
         <section key={`stats-${requestKey}-${loading}`} className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <StatCard label="SUBMISSIONS" value={loading ? "--" : rows.length} icon="📦" delay={0} />
+          <StatCard label="SUBMISSIONS" value={loading ? "--" : rangedRows.length} icon="📦" delay={0} />
           <StatCard label="AMBASSADORS" value={loading ? "--" : uniqueAmbassadors} icon="🪖" delay={90} />
           <StatCard label="LINKS" value={loading ? "--" : totalLinks} icon="🔗" delay={180} />
           <StatCard label="SEASON" value={season === "all" ? "ALL" : `0${season}`} icon="🏆" delay={270} />
@@ -889,7 +961,7 @@ export default function App() {
               Squad Submissions
               {!loading && (
                 <span className="font-['Rajdhani',sans-serif] text-xs tracking-widest text-zinc-500">
-                  ({filtered.length}/{rows.length})
+                  ({filtered.length}/{rangedRows.length})
                 </span>
               )}
             </h3>
@@ -916,7 +988,7 @@ export default function App() {
               <button
                 type="button"
                 title="Download Word report"
-                onClick={() => downloadDoc(filtered, season, task, scopeLabel)}
+                onClick={() => downloadDoc(filtered, season, task, scopeLabel, dateRange)}
                 disabled={loading || !!error || filtered.length === 0}
                 className="flex h-9 shrink-0 items-center gap-2 border border-zinc-700 px-3 text-xs font-bold tracking-[0.2em] text-amber-400 transition-all hover:border-amber-400 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -1037,7 +1109,11 @@ export default function App() {
                         NO ENEMIES SPOTTED
                       </p>
                       <p className="mt-1 text-sm text-zinc-600">
-                        {query ? `No submissions match "${query}".` : "No submissions for this task yet."}
+                        {query
+                          ? `No submissions match "${query}".`
+                          : hasDateRange && rows.length > 0
+                          ? "No submissions in the selected date range."
+                          : "No submissions for this task yet."}
                       </p>
                     </td>
                   </tr>
