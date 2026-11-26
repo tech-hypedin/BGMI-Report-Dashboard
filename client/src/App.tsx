@@ -728,7 +728,38 @@
 // }
 
 
+// Escape a value for CSV (always quoted, inner quotes doubled)
+function csvCell(value: string | number): string {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
 
+// Builds a CSV that mirrors the table exactly as shown on the page
+function downloadCsv(rows: Row[], fileLabel: string) {
+  const header = ["#", "Date", "IGN", "UID", "College", "Submission Links"];
+
+  const body = rows.map((r, i) => [
+    String(i + 1).padStart(2, "0"),
+    // Same format as the page: "24 Oct 2026" + "11:44 pm"
+    r.date ? `${formatDate(r.date)} ${formatTime(r.date)}` : r.rawDate || "No date",
+    r.ign,
+    r.uid,
+    r.collegeName,
+    r.links.length === 0 ? "NO LINKS" : r.links.map((l) => l.url).join(" | "),
+  ]);
+
+  const csv = [header, ...body].map((line) => line.map(csvCell).join(",")).join("\r\n");
+
+  // "\uFEFF" (BOM) makes Excel read the file as UTF-8
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${fileLabel.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "")}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
@@ -1311,6 +1342,17 @@ export default function App() {
                 className="grid h-9 w-9 shrink-0 place-items-center border border-zinc-700 text-amber-400 transition-all hover:border-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
               >
                 <span className={loading ? "animate-spin" : ""}>⟳</span>
+              </button>
+
+              {/* NEW: Download CSV button */}
+              <button
+                type="button"
+                title="Download CSV"
+                onClick={() => downloadCsv(filtered, selectedTask.label)}
+                disabled={loading || !!error || filtered.length === 0}
+                className="flex h-9 shrink-0 items-center gap-2 border border-zinc-700 px-3 text-xs font-bold tracking-[0.2em] text-amber-400 transition-all hover:border-amber-400 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <span aria-hidden>⬇</span> CSV
               </button>
             </div>
           </div>
