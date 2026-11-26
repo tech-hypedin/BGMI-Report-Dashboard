@@ -727,6 +727,120 @@
 //   );
 // }
 
+// Builds a Word report that mirrors what is shown on the page
+async function downloadDoc(rows: Row[], season: number, taskLabel: string) {
+  const headers = ["#", "Date", "IGN", "UID", "College", "Submission Links"];
+  const widths = [700, 2200, 2000, 2000, 3000, 5400]; // landscape A4, total 15300
+
+  const uniqueAmbassadors = new Set(rows.map((r) => `${r.ign}|${r.uid}`)).size;
+  const totalLinks = rows.reduce((n, r) => n + r.links.length, 0);
+
+  const para = (text: string, opts: { bold?: boolean; size?: number; color?: string } = {}) =>
+    new Paragraph({
+      spacing: { after: 60 },
+      children: [new TextRun({ text, size: opts.size ?? 20, bold: opts.bold, color: opts.color })],
+    });
+
+  const cell = (children: Paragraph[], width: number, header = false) =>
+    new TableCell({
+      width: { size: width, type: WidthType.DXA },
+      margins: { top: 80, bottom: 80, left: 100, right: 100 },
+      shading: header ? { type: ShadingType.CLEAR, fill: "F5A623", color: "auto" } : undefined,
+      children,
+    });
+
+  const headerRow = new TableRow({
+    tableHeader: true,
+    children: headers.map((h, i) => cell([para(h.toUpperCase(), { bold: true, color: "000000" })], widths[i], true)),
+  });
+
+  const bodyRows = rows.map((r, i) => {
+    const linkParas =
+      r.links.length === 0
+        ? [para("NO LINKS", { color: "888888" })]
+        : r.links.map(
+            (l, j) =>
+              new Paragraph({
+                spacing: { after: 60 },
+                children: [
+                  new ExternalHyperlink({
+                    link: l.url,
+                    children: [
+                      new TextRun({
+                        text: `${LINK_STYLE[l.kind].label}${r.links.length > 1 ? ` ${j + 1}` : ""}: ${l.url}`,
+                        size: 18,
+                        color: "0563C1",
+                        underline: {},
+                      }),
+                    ],
+                  }),
+                ],
+              })
+          );
+
+    return new TableRow({
+      cantSplit: true,
+      children: [
+        cell([para(String(i + 1).padStart(2, "0"))], widths[0]),
+        cell([para(r.date ? `${formatDate(r.date)} ${formatTime(r.date)}` : r.rawDate || "No date")], widths[1]),
+        cell([para(r.ign, { bold: true })], widths[2]),
+        cell([para(r.uid)], widths[3]),
+        cell([para(r.collegeName)], widths[4]),
+        cell(linkParas, widths[5]),
+      ],
+    });
+  });
+
+  const doc = new Document({
+    creator: "BGMI Campus MVP",
+    title: `${taskLabel} - Submission Report`,
+    sections: [
+      {
+        properties: {
+          page: {
+            size: { orientation: PageOrientation.LANDSCAPE },
+            margin: { top: 720, bottom: 720, left: 720, right: 720 },
+          },
+        },
+        children: [
+          new Paragraph({
+            alignment: AlignmentType.LEFT,
+            spacing: { after: 80 },
+            children: [new TextRun({ text: "BGMI Campus MVP", bold: true, size: 44, color: "F5A623" })],
+          }),
+          para("Submission Report", { size: 28, bold: true }),
+          para(`Season: ${season}`),
+          para(`Task: ${taskLabel}`),
+          para(`Generated: ${formatDate(new Date())} ${formatTime(new Date())}`),
+          new Paragraph({ spacing: { after: 120 }, children: [] }),
+          para("SUMMARY", { bold: true, size: 24 }),
+          para(`Submissions: ${rows.length}`),
+          para(`Ambassadors: ${uniqueAmbassadors}`),
+          para(`Links: ${totalLinks}`),
+          new Paragraph({ spacing: { after: 120 }, children: [] }),
+          para("SQUAD SUBMISSIONS", { bold: true, size: 24 }),
+          new Table({
+            width: { size: 15300, type: WidthType.DXA },
+            columnWidths: widths,
+            rows: [headerRow, ...bodyRows],
+          }),
+        ],
+      },
+    ],
+  });
+
+  const blob = await Packer.toBlob(doc);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${taskLabel.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "")}_Report.docx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+
 
 // Escape a value for CSV (always quoted, inner quotes doubled)
 function csvCell(value: string | number): string {
@@ -763,6 +877,21 @@ function downloadCsv(rows: Row[], fileLabel: string) {
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
+
+import {
+  Document,
+  Packer,
+  Paragraph,
+  Table,
+  TableRow,
+  TableCell,
+  TextRun,
+  WidthType,
+  ShadingType,
+  AlignmentType,
+  PageOrientation,
+  ExternalHyperlink,
+} from "docx";
 
 /* ============================================================
    API CONFIG
@@ -1342,6 +1471,16 @@ export default function App() {
                 className="grid h-9 w-9 shrink-0 place-items-center border border-zinc-700 text-amber-400 transition-all hover:border-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
               >
                 <span className={loading ? "animate-spin" : ""}>⟳</span>
+              </button>
+
+              <button
+                type="button"
+                title="Download Word report"
+                onClick={() => downloadDoc(filtered, season, selectedTask.label)}
+                disabled={loading || !!error || filtered.length === 0}
+                className="flex h-9 shrink-0 items-center gap-2 border border-zinc-700 px-3 text-xs font-bold tracking-[0.2em] text-amber-400 transition-all hover:border-amber-400 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <span aria-hidden>⬇</span> DOC
               </button>
 
               {/* NEW: Download CSV button */}
