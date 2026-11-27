@@ -12,7 +12,7 @@ const API_URL: string =
 // submissions spreadsheet every time the Word report is downloaded. Leave empty to skip.
 const SHEETS_WEBAPP_URL: string =
   import.meta.env.VITE_SHEETS_WEBAPP_URL ??
-  "https://script.google.com/macros/s/AKfycby4rDSzplpZ4mcCbvyrBc84-gPkPHGKBoKbq-VWWcH3yR7auk00R-YxTI8WaG8fi2BU/exec";
+  "https://script.google.com/macros/s/AKfycbwRT45mf4GdqWeKYz2lN6Ck6Nf18EZZDYD-QcFivghJ71gKUodV6-IlVXIYDUN60UY/exec";
 
 /* ============================================================
    TYPES
@@ -102,12 +102,27 @@ interface SheetRow {
   proofLinks: string[];
 }
 
+// One tab to overwrite: a season tab ("Season 1") or a task's own tab
 interface SheetSeasonBlock {
+  kind: "season" | "task";
   season: SeasonNumber;
-  sheetName: string; // tab this season's rows overwrite, e.g. "Season 1"
-  sheetGid: number | null; // fallback if the tab is renamed
+  taskId?: string; // only for task tabs
+  sheetName: string; // tab looked up by name first...
+  sheetGid: number | null; // ...then by gid (task tabs are found by gid)
   sheetLabel: string;
   rows: SheetRow[];
+}
+
+// A tab that gets updated (and linked in the Word report) for the current selection
+interface SheetTarget {
+  kind: "season" | "task";
+  season: SeasonNumber;
+  taskId?: string;
+  sheetName: string;
+  sheetGid: number | null;
+  label: string;
+  link: string | undefined;
+  tasks: TaskData[]; // the task data written to this tab
 }
 
 interface SheetSyncPayload {
@@ -213,6 +228,31 @@ const SHEET_LINKS: Partial<Record<SeasonNumber, string>> = {
   1: "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=1965542281#gid=1965542281",
   2: "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=2031594151#gid=2031594151",
   3: "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=146651924#gid=146651924",
+};
+
+// Tasks that have their own tab in the BGMI Submissions Master sheet (taskId → tab link)
+const TASK_SHEET_LINKS: Record<string, string> = {
+  // Recruit the Squad - Season 3
+  "6ada5d61889b4b59d6e69bde":
+    "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=1952618541#gid=1952618541",
+  // Custom Classic Matches (Week 1 & 2) - Season 3
+  "6ada5dd23bd322bdfd1b2104":
+    "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=264393926#gid=264393926",
+  // Custom Classic Matches (Week 3 & 4) - Season 3
+  "6ada5e2ca4d7536c8254a700":
+    "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=916757449#gid=916757449",
+  // Capture the Clutch - Season 3
+  "6ada5e962da30de8da222e18":
+    "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=1789586385#gid=1789586385",
+  // BGMI Campus MVP LinkedIn Post - Season 3
+  "6ada5eeb889b4b59d6e69bdf":
+    "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=974475846#gid=974475846",
+  // My BGMI MVP Journey (Reel) - Season 3
+  "6ada5f603bd322bdfd1b2105":
+    "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=42837347#gid=42837347",
+  // Booster: KIARAA SHOWDOWN - Season 3
+  "6ae83bbef4a0bf8c4c95e8ec":
+    "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=1749056249#gid=1749056249",
 };
 
 // Spreadsheet tab each season's submissions are written to
@@ -406,24 +446,65 @@ function parseSheetLink(url: string | undefined): { spreadsheetId: string | null
   return { spreadsheetId: id, gid: gid ? Number(gid) : null };
 }
 
-// Groups the date-ranged task data by season. Every season in scope gets a block (even
-// with 0 rows, so its tab is cleared), and the Apps Script overwrites that season's tab.
-// A season with a task that failed to load is left out, so its tab is never
+// Decides which tabs the DOC button updates (and links in the report):
+// - All Seasons / a season with All Tasks → each season tab + every task tab in scope
+// - One task that has its own tab → only that task's tab
+// - One task without its own tab → its season tab (as before)
+function planSheetTargets(season: SeasonValue, taskValue: string, taskData: TaskData[]): SheetTarget[] {
+  const seasonNumbers: SeasonNumber[] = [1, 2, 3];
+  const singleTask = season !== "all" && taskValue !== ALL_TASKS;
+  const targets: SheetTarget[] = [];
+
+  seasonNumbers.forEach((s) => {
+    const seasonTasks = taskData.filter((t) => t.season === s);
+    if (seasonTasks.length === 0) return;
+
+    const taskTargets: SheetTarget[] = seasonTasks
+      .filter((t) => TASK_SHEET_LINKS[t.value])
+      .map((t) => ({
+        kind: "task",
+        season: s,
+        taskId: t.value,
+        sheetName: t.label,
+        sheetGid: parseSheetLink(TASK_SHEET_LINKS[t.value]).gid,
+        label: t.label,
+        link: TASK_SHEET_LINKS[t.value],
+        tasks: [t],
+      }));
+
+    if (!(singleTask && taskTargets.length > 0)) {
+      targets.push({
+        kind: "season",
+        season: s,
+        sheetName: SHEET_TAB_NAME[s],
+        sheetGid: parseSheetLink(SHEET_LINKS[s]).gid,
+        label: SHEET_LINK_LABEL[s],
+        link: SHEET_LINKS[s],
+        tasks: seasonTasks,
+      });
+    }
+    targets.push(...taskTargets);
+  });
+
+  return targets;
+}
+
+// One block per target tab (even with 0 rows, so the tab is cleared); the Apps Script
+// overwrites each tab. A tab whose task data failed to load is left out, so it is never
 // overwritten with partial data.
 function buildSheetPayload(
-  taskData: TaskData[],
+  targets: SheetTarget[],
   scopeLabel: string,
   dateRange: DateRange
-): { payload: SheetSyncPayload; skippedSeasons: SeasonNumber[] } {
-  const seasonNumbers: SeasonNumber[] = [1, 2, 3];
-  const inScope = seasonNumbers.filter((s) => taskData.some((t) => t.season === s));
-  const skippedSeasons = inScope.filter((s) => taskData.some((t) => t.season === s && !t.ok));
+): { payload: SheetSyncPayload; skippedTabs: string[] } {
+  const skippedTabs = targets.filter((t) => t.tasks.some((d) => !d.ok)).map((t) => t.sheetName);
 
-  const seasons: SheetSeasonBlock[] = inScope
-    .filter((s) => !skippedSeasons.includes(s))
-    .map((s) => {
-      const rows: SheetRow[] = taskData
-        .filter((t) => t.season === s)
+  // Sent under "seasons" so the deployed Apps Script handles task tabs without changes
+  const seasons: SheetSeasonBlock[] = targets
+    .filter((target) => target.tasks.every((d) => d.ok))
+    .map((target) => {
+      const s = target.season;
+      const rows: SheetRow[] = target.tasks
         .flatMap((t) =>
           t.rows.map((r) => ({
             submissionId: r.id,
@@ -442,10 +523,12 @@ function buildSheetPayload(
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
       return {
+        kind: target.kind,
         season: s,
-        sheetName: SHEET_TAB_NAME[s],
-        sheetGid: parseSheetLink(SHEET_LINKS[s]).gid,
-        sheetLabel: SHEET_LINK_LABEL[s],
+        taskId: target.taskId,
+        sheetName: target.sheetName,
+        sheetGid: target.sheetGid,
+        sheetLabel: target.label,
         rows,
       };
     });
@@ -460,7 +543,7 @@ function buildSheetPayload(
     seasons,
   };
 
-  return { payload, skippedSeasons };
+  return { payload, skippedTabs };
 }
 
 // Posts the payload to the Apps Script web app.
@@ -477,7 +560,13 @@ async function syncToSheet(payload: SheetSyncPayload): Promise<SheetSyncResponse
 }
 
 // Builds a Word report written as numeric paragraphs, plus task-wise details
-async function downloadDoc(rows: Row[], season: SeasonValue, scopeLabel: string, taskData: TaskData[]) {
+async function downloadDoc(
+  rows: Row[],
+  season: SeasonValue,
+  scopeLabel: string,
+  taskData: TaskData[],
+  targets: SheetTarget[]
+) {
   const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
   const para = (text: string, opts: { bold?: boolean; size?: number; color?: string } = {}) =>
@@ -499,6 +588,19 @@ async function downloadDoc(rows: Row[], season: SeasonValue, scopeLabel: string,
       bullet: { level: 0 },
       spacing: { after: 40 },
       children: [new TextRun({ text, size: 22 })],
+    });
+
+  // "Label: <link>" line pointing to a tab of the spreadsheet
+  const sheetLinkPara = (label: string, link: string) =>
+    new Paragraph({
+      spacing: { after: 160 },
+      children: [
+        new TextRun({ text: `${label}: `, bold: true, size: 22 }),
+        new ExternalHyperlink({
+          link,
+          children: [new TextRun({ text: link, size: 22, color: "0563C1", underline: {} })],
+        }),
+      ],
     });
 
   // "Label: value" line with a bold label
@@ -639,27 +741,19 @@ async function downloadDoc(rows: Row[], season: SeasonValue, scopeLabel: string,
       const taskLinkCount = t.rows.reduce((n, r) => n + r.links.length, 0);
       sections.push(
         bullet(`Number of submissions: ${t.rows.length}`),
-        bullet(`Number of links: ${taskLinkCount}`),
-        new Paragraph({ spacing: { after: 80 }, children: [] })
+        bullet(`Number of links: ${taskLinkCount}`)
       );
+
+      // This task's own tab, when it is updated
+      const taskTarget = targets.find((x) => x.kind === "task" && x.taskId === t.value);
+      if (taskTarget?.link) sections.push(sheetLinkPara("Submission Details", taskTarget.link));
+
+      sections.push(new Paragraph({ spacing: { after: 80 }, children: [] }));
     });
 
-    // One spreadsheet link for all the tasks of this season
-    const sheetLink = SHEET_LINKS[s];
-    if (sheetLink) {
-      sections.push(
-        new Paragraph({
-          spacing: { after: 160 },
-          children: [
-            new TextRun({ text: `${SHEET_LINK_LABEL[s]}: `, bold: true, size: 22 }),
-            new ExternalHyperlink({
-              link: sheetLink,
-              children: [new TextRun({ text: sheetLink, size: 22, color: "0563C1", underline: {} })],
-            }),
-          ],
-        })
-      );
-    }
+    // The season tab, when it is updated
+    const seasonTarget = targets.find((x) => x.kind === "season" && x.season === s);
+    if (seasonTarget?.link) sections.push(sheetLinkPara(seasonTarget.label, seasonTarget.link));
   });
 
   const now = new Date();
@@ -964,9 +1058,11 @@ export default function App() {
 
     // 1. Load every task in scope for the selected date range (all data if no range)
     let taskData: TaskData[];
+    let targets: SheetTarget[];
     try {
       taskData = await fetchTaskData(season, task, dateRange);
-      await downloadDoc(filtered, season, scopeLabel, taskData);
+      targets = planSheetTargets(season, task, taskData);
+      await downloadDoc(filtered, season, scopeLabel, taskData, targets);
     } catch {
       setExportStatus({ state: "error", message: "Could not build the Word report. Please try again." });
       return;
@@ -981,13 +1077,13 @@ export default function App() {
       return;
     }
 
-    const { payload, skippedSeasons } = buildSheetPayload(taskData, scopeLabel, dateRange);
+    const { payload, skippedTabs } = buildSheetPayload(targets, scopeLabel, dateRange);
     const rangeText = hasDateRange
       ? `from ${dateRange.from || "the start"} to ${dateRange.to || "today"}`
       : "for all dates";
     const skippedNote =
-      skippedSeasons.length > 0
-        ? ` ${skippedSeasons.map((s) => SHEET_TAB_NAME[s]).join(", ")} not updated because some of its tasks could not be loaded.`
+      skippedTabs.length > 0
+        ? ` ${skippedTabs.join(", ")} not updated because some task data could not be loaded.`
         : "";
 
     if (payload.seasons.length === 0) {
@@ -1010,7 +1106,7 @@ export default function App() {
         .map((b) => `${b.sheetName}: ${b.rows.length} submission${b.rows.length === 1 ? "" : "s"}`)
         .join(", ");
       setExportStatus({
-        state: skippedSeasons.length > 0 ? "warn" : "done",
+        state: skippedTabs.length > 0 ? "warn" : "done",
         message: `Report downloaded and Google Sheet overwritten ${rangeText} (${summary}).${skippedNote}`,
       });
     } catch (err) {
