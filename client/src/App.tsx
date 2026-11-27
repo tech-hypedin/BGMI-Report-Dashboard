@@ -8,6 +8,12 @@ import { Document, ExternalHyperlink, Packer, Paragraph, Table, TextRun } from "
 const API_URL: string =
   import.meta.env.VITE_API_URL ?? "https://bgmicampusmvp.com/api/admin/getSubmissionDetails";
 
+// Google Apps Script web app URL (ends in /exec). Receives the rows to append to the
+// submissions spreadsheet every time the Word report is downloaded. Leave empty to skip.
+const SHEETS_WEBAPP_URL: string =
+  import.meta.env.VITE_SHEETS_WEBAPP_URL ??
+  "https://script.google.com/macros/s/AKfycbwRT45mf4GdqWeKYz2lN6Ck6Nf18EZZDYD-QcFivghJ71gKUodV6-IlVXIYDUN60UY/exec";
+
 /* ============================================================
    TYPES
    ============================================================ */
@@ -72,6 +78,57 @@ interface FetchResult {
   rows: Row[];
   error: string | null;
 }
+
+// One task's submissions, already filtered to the selected date range
+interface TaskData {
+  season: SeasonNumber;
+  label: string;
+  value: string;
+  ok: boolean;
+  rows: Row[];
+}
+
+// ---- Google Sheet sync payload (contract for the Apps Script doPost) ----
+interface SheetRow {
+  submissionId: string;
+  season: SeasonNumber;
+  taskId: string;
+  task: string;
+  date: string; // as shown on the page, e.g. "24 Oct 2026 11:44 pm"
+  createdAt: string; // ISO string, empty if the date could not be read
+  ign: string;
+  uid: string;
+  collegeName: string;
+  proofLinks: string[];
+}
+
+interface SheetSeasonBlock {
+  season: SeasonNumber;
+  sheetName: string; // tab this season's rows overwrite, e.g. "Season 1"
+  sheetGid: number | null; // fallback if the tab is renamed
+  sheetLabel: string;
+  rows: SheetRow[];
+}
+
+interface SheetSyncPayload {
+  action: "overwriteSubmissions";
+  spreadsheetId: string | null;
+  generatedAt: string; // ISO
+  scope: string;
+  dateRange: { from: string | null; to: string | null }; // null = not set (all data)
+  totalRows: number;
+  seasons: SheetSeasonBlock[];
+}
+
+interface SheetSyncResponse {
+  success: boolean;
+  message?: string;
+  written?: number;
+}
+
+type ExportStatus =
+  | { state: "idle" }
+  | { state: "working" | "done" | "warn" | "error"; message: string };
 
 /* ============================================================
    DROPDOWN CONFIG
@@ -156,6 +213,13 @@ const SHEET_LINKS: Partial<Record<SeasonNumber, string>> = {
   1: "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=1965542281#gid=1965542281",
   2: "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=2031594151#gid=2031594151",
   3: "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=146651924#gid=146651924",
+};
+
+// Spreadsheet tab each season's submissions are written to
+const SHEET_TAB_NAME: Record<SeasonNumber, string> = {
+  1: "Season 1",
+  2: "Season 2",
+  3: "Season 3",
 };
 
 const SHEET_LINK_LABEL: Record<SeasonNumber, string> = {
@@ -306,14 +370,114 @@ function downloadCsv(rows: Row[], fileLabel: string) {
   URL.revokeObjectURL(url);
 }
 
-// Builds a Word report written as numeric paragraphs, plus task-wise details
-async function downloadDoc(
-  rows: Row[],
-  season: SeasonValue,
-  taskValue: string,
+// Loads every task in scope (one request per task) and keeps only the selected date range.
+// With no date range selected, all of each task's submissions are kept.
+async function fetchTaskData(season: SeasonValue, taskValue: string, dateRange: DateRange): Promise<TaskData[]> {
+  const seasonNumbers: SeasonNumber[] = [1, 2, 3];
+  const scopeTasks = seasonNumbers
+    .filter((s) => season === "all" || s === season)
+    .flatMap((s) =>
+      TASKS_BY_SEASON[s]
+        .filter((t) => season === "all" || taskValue === ALL_TASKS || t.value === taskValue)
+        .map((t) => ({ season: s, label: t.label, value: t.value }))
+    );
+
+  return Promise.all(
+    scopeTasks.map(async (t) => {
+      try {
+        const { data } = await axios.get<SubmissionDetailsResponse>(API_URL, {
+          params: { taskId: t.value },
+        });
+        if (!data?.success) return { ...t, ok: false, rows: [] as Row[] };
+        const taskRows = buildRows(data.ambassadors ?? [], data.submissions ?? []);
+        return { ...t, ok: true, rows: filterByDateRange(taskRows, dateRange) };
+      } catch {
+        return { ...t, ok: false, rows: [] as Row[] };
+      }
+    })
+  );
+}
+
+// "…/spreadsheets/d/<id>/edit?gid=123#gid=123" → { spreadsheetId, gid }
+function parseSheetLink(url: string | undefined): { spreadsheetId: string | null; gid: number | null } {
+  if (!url) return { spreadsheetId: null, gid: null };
+  const id = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/)?.[1] ?? null;
+  const gid = url.match(/[?#&]gid=(\d+)/)?.[1];
+  return { spreadsheetId: id, gid: gid ? Number(gid) : null };
+}
+
+// Groups the date-ranged task data by season. Every season in scope gets a block (even
+// with 0 rows, so its tab is cleared), and the Apps Script overwrites that season's tab.
+// A season with a task that failed to load is left out, so its tab is never
+// overwritten with partial data.
+function buildSheetPayload(
+  taskData: TaskData[],
   scopeLabel: string,
   dateRange: DateRange
-) {
+): { payload: SheetSyncPayload; skippedSeasons: SeasonNumber[] } {
+  const seasonNumbers: SeasonNumber[] = [1, 2, 3];
+  const inScope = seasonNumbers.filter((s) => taskData.some((t) => t.season === s));
+  const skippedSeasons = inScope.filter((s) => taskData.some((t) => t.season === s && !t.ok));
+
+  const seasons: SheetSeasonBlock[] = inScope
+    .filter((s) => !skippedSeasons.includes(s))
+    .map((s) => {
+      const rows: SheetRow[] = taskData
+        .filter((t) => t.season === s)
+        .flatMap((t) =>
+          t.rows.map((r) => ({
+            submissionId: r.id,
+            season: s,
+            taskId: t.value,
+            task: t.label,
+            date: r.date ? `${formatDate(r.date)} ${formatTime(r.date)}` : r.rawDate || "No date",
+            createdAt: r.date ? r.date.toISOString() : "",
+            ign: r.ign,
+            uid: r.uid,
+            collegeName: r.collegeName,
+            proofLinks: r.links.map((l) => l.url),
+          }))
+        )
+        // newest first, same order as the dashboard
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+      return {
+        season: s,
+        sheetName: SHEET_TAB_NAME[s],
+        sheetGid: parseSheetLink(SHEET_LINKS[s]).gid,
+        sheetLabel: SHEET_LINK_LABEL[s],
+        rows,
+      };
+    });
+
+  const payload: SheetSyncPayload = {
+    action: "overwriteSubmissions",
+    spreadsheetId: parseSheetLink(Object.values(SHEET_LINKS)[0]).spreadsheetId,
+    generatedAt: new Date().toISOString(),
+    scope: scopeLabel,
+    dateRange: { from: dateRange.from || null, to: dateRange.to || null },
+    totalRows: seasons.reduce((n, b) => n + b.rows.length, 0),
+    seasons,
+  };
+
+  return { payload, skippedSeasons };
+}
+
+// Posts the payload to the Apps Script web app.
+// Sent as text/plain so the browser skips the CORS preflight, which Apps Script can't answer;
+// the script reads it with JSON.parse(e.postData.contents).
+async function syncToSheet(payload: SheetSyncPayload): Promise<SheetSyncResponse> {
+  const { data } = await axios.post<SheetSyncResponse>(SHEETS_WEBAPP_URL, JSON.stringify(payload), {
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+  });
+  if (!data || typeof data !== "object" || !data.success) {
+    throw new Error((data && typeof data === "object" && data.message) || "The sheet script did not confirm the update.");
+  }
+  return data;
+}
+
+// Builds a Word report written as numeric paragraphs, plus task-wise details
+async function downloadDoc(rows: Row[], season: SeasonValue, scopeLabel: string, taskData: TaskData[]) {
   const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
   const para = (text: string, opts: { bold?: boolean; size?: number; color?: string } = {}) =>
@@ -402,30 +566,8 @@ async function downloadDoc(
     body(linkSummary),
   ];
 
-  /* ---------- per-task data (one request per task in scope) ---------- */
+  /* ---------- per-task data (fetched once by the caller, shared with the sheet sync) ---------- */
   const seasonNumbers: SeasonNumber[] = [1, 2, 3];
-  const scopeTasks = seasonNumbers
-    .filter((s) => season === "all" || s === season)
-    .flatMap((s) =>
-      TASKS_BY_SEASON[s]
-        .filter((t) => season === "all" || taskValue === ALL_TASKS || t.value === taskValue)
-        .map((t) => ({ season: s, label: t.label, value: t.value }))
-    );
-
-  const taskData = await Promise.all(
-    scopeTasks.map(async (t) => {
-      try {
-        const { data } = await axios.get<SubmissionDetailsResponse>(API_URL, {
-          params: { taskId: t.value },
-        });
-        if (!data?.success) return { ...t, ok: false, rows: [] as Row[] };
-        const taskRows = buildRows(data.ambassadors ?? [], data.submissions ?? []);
-        return { ...t, ok: true, rows: filterByDateRange(taskRows, dateRange) };
-      } catch {
-        return { ...t, ok: false, rows: [] as Row[] };
-      }
-    })
-  );
 
   // Extra details only for All Seasons (all tasks): month-wise submissions based on createdAt
   if (season === "all") {
@@ -813,6 +955,73 @@ export default function App() {
   const uniqueAmbassadors = new Set(rangedRows.map((r) => `${r.ign}|${r.uid}`)).size;
   const totalLinks = rangedRows.reduce((n, r) => n + r.links.length, 0);
 
+  /* ---------- DOC download + Google Sheet append ---------- */
+  const [exportStatus, setExportStatus] = useState<ExportStatus>({ state: "idle" });
+  const exporting = exportStatus.state === "working";
+
+  const handleDownloadDoc = async () => {
+    setExportStatus({ state: "working", message: "Building the Word report..." });
+
+    // 1. Load every task in scope for the selected date range (all data if no range)
+    let taskData: TaskData[];
+    try {
+      taskData = await fetchTaskData(season, task, dateRange);
+      await downloadDoc(filtered, season, scopeLabel, taskData);
+    } catch {
+      setExportStatus({ state: "error", message: "Could not build the Word report. Please try again." });
+      return;
+    }
+
+    // 2. Overwrite each season's tab in the Google Sheet with the same submissions
+    if (!SHEETS_WEBAPP_URL) {
+      setExportStatus({
+        state: "warn",
+        message: "Report downloaded. Sheet not updated: VITE_SHEETS_WEBAPP_URL is not set.",
+      });
+      return;
+    }
+
+    const { payload, skippedSeasons } = buildSheetPayload(taskData, scopeLabel, dateRange);
+    const rangeText = hasDateRange
+      ? `from ${dateRange.from || "the start"} to ${dateRange.to || "today"}`
+      : "for all dates";
+    const skippedNote =
+      skippedSeasons.length > 0
+        ? ` ${skippedSeasons.map((s) => SHEET_TAB_NAME[s]).join(", ")} not updated because some of its tasks could not be loaded.`
+        : "";
+
+    if (payload.seasons.length === 0) {
+      setExportStatus({
+        state: "error",
+        message: `Report downloaded, but no sheet was updated.${skippedNote}`,
+      });
+      return;
+    }
+
+    const tabNames = payload.seasons.map((b) => b.sheetName).join(", ");
+    setExportStatus({
+      state: "working",
+      message: `Report downloaded. Overwriting ${tabNames} in the Google Sheet ${rangeText}...`,
+    });
+
+    try {
+      await syncToSheet(payload);
+      const summary = payload.seasons
+        .map((b) => `${b.sheetName}: ${b.rows.length} submission${b.rows.length === 1 ? "" : "s"}`)
+        .join(", ");
+      setExportStatus({
+        state: skippedSeasons.length > 0 ? "warn" : "done",
+        message: `Report downloaded and Google Sheet overwritten ${rangeText} (${summary}).${skippedNote}`,
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "Unknown error";
+      setExportStatus({
+        state: "error",
+        message: `Report downloaded, but the Google Sheet was not updated: ${reason}`,
+      });
+    }
+  };
+
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[#07080a] font-['Rajdhani',sans-serif] text-zinc-100 selection:bg-amber-400 selection:text-black">
       {/* Fonts */}
@@ -987,12 +1196,15 @@ export default function App() {
 
               <button
                 type="button"
-                title="Download Word report"
-                onClick={() => downloadDoc(filtered, season, task, scopeLabel, dateRange)}
-                disabled={loading || !!error || filtered.length === 0}
+                title="Download Word report and add the submissions to the Google Sheet"
+                onClick={handleDownloadDoc}
+                disabled={loading || !!error || filtered.length === 0 || exporting}
                 className="flex h-9 shrink-0 items-center gap-2 border border-zinc-700 px-3 text-xs font-bold tracking-[0.2em] text-amber-400 transition-all hover:border-amber-400 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <span aria-hidden>⬇</span> DOC
+                <span aria-hidden className={exporting ? "animate-spin" : ""}>
+                  {exporting ? "⟳" : "⬇"}
+                </span>
+                DOC
               </button>
 
               <button
@@ -1006,6 +1218,40 @@ export default function App() {
               </button>
             </div>
           </div>
+
+          {/* Report / sheet sync status */}
+          {exportStatus.state !== "idle" && (
+            <div
+              role="status"
+              className={`flex items-start justify-between gap-4 border-b px-5 py-3 text-sm font-semibold ${
+                exportStatus.state === "working"
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                  : exportStatus.state === "done"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                  : exportStatus.state === "warn"
+                  ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-200"
+                  : "border-red-500/30 bg-red-500/10 text-red-200"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                {exportStatus.state === "working" && <span className="animate-spin">⟳</span>}
+                {exportStatus.state === "done" && <span>✔</span>}
+                {exportStatus.state === "warn" && <span>⚠</span>}
+                {exportStatus.state === "error" && <span>✖</span>}
+                {exportStatus.message}
+              </span>
+              {!exporting && (
+                <button
+                  type="button"
+                  aria-label="Dismiss"
+                  onClick={() => setExportStatus({ state: "idle" })}
+                  className="shrink-0 text-xs font-bold tracking-widest opacity-70 hover:opacity-100"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-left">
