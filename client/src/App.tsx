@@ -230,6 +230,13 @@ const SHEET_LINKS: Partial<Record<SeasonNumber, string>> = {
   3: "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=146651924#gid=146651924",
 };
 
+// Season dates shown in the Word report when no date range is selected
+const SEASON_DATE_RANGES: Record<SeasonNumber, string> = {
+  1: "3 Aug 2026 - 3 Sep 2026",
+  2: "5 Sep 2026 - 18 Oct 2026",
+  3: "23 Oct 2026 - 25 Dec 2026",
+};
+
 // Tasks that have their own tab in the BGMI Submissions Master sheet (taskId → tab link)
 const TASK_SHEET_LINKS: Record<string, string> = {
   // Recruit the Squad - Season 3
@@ -565,7 +572,8 @@ async function downloadDoc(
   season: SeasonValue,
   scopeLabel: string,
   taskData: TaskData[],
-  targets: SheetTarget[]
+  targets: SheetTarget[],
+  dateRange: DateRange
 ) {
   const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
@@ -617,28 +625,6 @@ async function downloadDoc(
   const totalSubmissions = rows.length;
   const uniqueAmbassadors = new Set(rows.map((r) => `${r.ign}|${r.uid}`)).size;
   const uniqueColleges = new Set(rows.map((r) => r.collegeName).filter((c) => c !== "N/A")).size;
-  const submissionsWithoutLinks = rows.filter((r) => r.links.length === 0).length;
-
-  const isSpreadsheet = (url: string) =>
-    /docs\.google\.com\/spreadsheets|\.(xlsx?|csv)(\?|#|$)/i.test(url);
-
-  // Each link lands in exactly one bucket, so the buckets add up to the total
-  let instagramLinks = 0;
-  let driveLinks = 0;
-  let linkedinLinks = 0;
-  let spreadsheetLinks = 0;
-  let otherLinks = 0;
-
-  rows.forEach((r) =>
-    r.links.forEach((l) => {
-      if (l.kind === "instagram") instagramLinks++;
-      else if (l.kind === "linkedin") linkedinLinks++;
-      else if (isSpreadsheet(l.url)) spreadsheetLinks++;
-      else if (l.kind === "drive") driveLinks++;
-      else otherLinks++;
-    })
-  );
-  const totalLinks = instagramLinks + driveLinks + linkedinLinks + spreadsheetLinks + otherLinks;
 
   /* ---------- paragraphs ---------- */
   const overview = `This report summarises the proof submissions received in the BGMI Campus MVP Program, the BGMI Campus Ambassador Program, for ${scopeLabel}. In total, ${plural(
@@ -649,23 +635,9 @@ async function downloadDoc(
     "college"
   )}.`;
 
-  const linkSummary = `Together, these submissions contain ${plural(totalLinks, "proof link")}: ${plural(
-    instagramLinks,
-    "Instagram link"
-  )}, ${plural(driveLinks, "Google Drive link")}, ${plural(linkedinLinks, "LinkedIn link")}, ${plural(
-    spreadsheetLinks,
-    "spreadsheet link"
-  )} and ${plural(otherLinks, "other link")}. ${
-    submissionsWithoutLinks === 0
-      ? "Every submission includes at least one proof link."
-      : `${plural(submissionsWithoutLinks, "submission")} ${submissionsWithoutLinks === 1 ? "has" : "have"} no proof link attached.`
-  }`;
-
   const sections: (Paragraph | Table)[] = [
     para("OVERVIEW", { bold: true, size: 24 }),
     body(overview),
-    para("PROOF LINKS", { bold: true, size: 24 }),
-    body(linkSummary),
   ];
 
   /* ---------- per-task data (fetched once by the caller, shared with the sheet sync) ---------- */
@@ -758,6 +730,32 @@ async function downloadDoc(
 
   const now = new Date();
 
+  /* ---------- date range shown at the top ---------- */
+  // "2026-11-01" → "1 Nov 2026" (read as a local date)
+  const rangeDate = (value: string) =>
+    new Date(`${value}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+
+  const dateRangeLines: Paragraph[] = [];
+  if (dateRange.from || dateRange.to) {
+    // A date range was selected on the dashboard
+    const text =
+      dateRange.from && dateRange.to
+        ? `${rangeDate(dateRange.from)} - ${rangeDate(dateRange.to)}`
+        : dateRange.from
+        ? `From ${rangeDate(dateRange.from)}`
+        : `Up to ${rangeDate(dateRange.to)}`;
+    dateRangeLines.push(field("Date Range", text));
+  } else if (season === "all") {
+    // No range selected: every season's dates
+    dateRangeLines.push(
+      field("Date Range", ""),
+      ...seasonNumbers.map((s) => bullet(`Season ${s}: ${SEASON_DATE_RANGES[s]}`))
+    );
+  } else {
+    // No range selected: the selected season's dates
+    dateRangeLines.push(field("Date Range", SEASON_DATE_RANGES[season]));
+  }
+
   const doc = new Document({
     creator: "BGMI Campus MVP",
     title: `${scopeLabel} - Submission Report`,
@@ -771,6 +769,7 @@ async function downloadDoc(
           para("Submission Report", { size: 28, bold: true }),
           field("Season", season === "all" ? "All Seasons" : String(season)),
           field("Task", scopeLabel),
+          ...dateRangeLines,
           field("Generated", `${formatDate(now)} ${formatTime(now)}`),
           new Paragraph({ spacing: { after: 120 }, children: [] }),
           ...sections,
@@ -1062,7 +1061,7 @@ export default function App() {
     try {
       taskData = await fetchTaskData(season, task, dateRange);
       targets = planSheetTargets(season, task, taskData);
-      await downloadDoc(filtered, season, scopeLabel, taskData, targets);
+      await downloadDoc(filtered, season, scopeLabel, taskData, targets, dateRange);
     } catch {
       setExportStatus({ state: "error", message: "Could not build the Word report. Please try again." });
       return;
