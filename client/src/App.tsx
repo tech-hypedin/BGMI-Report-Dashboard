@@ -12,7 +12,7 @@ const API_URL: string =
 // submissions spreadsheet every time the Word report is downloaded. Leave empty to skip.
 const SHEETS_WEBAPP_URL: string =
   import.meta.env.VITE_SHEETS_WEBAPP_URL ??
-  "https://script.google.com/macros/s/AKfycbyOml6jcWLmu9dMyNIC4jfVJnr0Oh8d-NwGAxUXEb2aaBSOKKUok38neBAyHubzrvHO/exec";
+  "https://script.google.com/macros/s/AKfycbxGH5COyvLig_J402ZfUwkASQSRnxkWtz-IuOMCWPpecgDYqVegK0-nvd66xpPM3Fs3/exec";
 
 /* ============================================================
    TYPES
