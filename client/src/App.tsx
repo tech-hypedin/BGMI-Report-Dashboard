@@ -64,6 +64,7 @@ interface Row {
   uid: string;
   collegeName: string;
   taskName: string;
+  taskDescription: string;
   links: SubmissionLink[];
 }
 
@@ -219,6 +220,74 @@ const TASKS_BY_SEASON: Record<SeasonNumber, Option<string>[]> = {
   ],
 };
 
+// taskId → task description (shown in the Word report and the CSV). "\n" starts a new line.
+const TASK_DESCRIPTIONS: Record<string, string> = {
+  /* ---------- Season 1 ---------- */
+  // CAPTURE THE CLUTCH - Season 1
+  "6a58c356457bea701ebd218c": "Create and upload 2 exciting in-game BGMI reels before Phase 1 ends.",
+  // LIVIK LOCKDOWN - Week 1 & Week 2(Combined) - Season 1
+  "6a58c5dbeedf4fd8e801cef5": "Play at least 10 Custom matches by the end of week 2 phase 1.",
+  // RECRUIT THE SQUAD - Season 1
+  "6a58c6633e78410396961622":
+    "Invite 15 campus players to your official Campus MVP squad and submit their BGMI UIDs. BY THE END OF 18TH AUG.",
+  // LIVIK LOCKDOWN - Week 3 - Season 1
+  "6a7470738fce8ec8fd2e040c": "Play at least 5 Custom matches by the end of week 3 phase 1.",
+  // LIVIK LOCKDOWN - Week 4 - Season 1
+  "6a7471e839d1c73094a1aa24": "Play at least 5 Custom matches by the end of week 4 phase 1.",
+  // BOOSTER TASK: COHORT CONNECT - Season 1
+  "6a8d54c2db70a0a21fac09a0":
+    "Bring your cohort together and sit together for a BGMI gaming session. Get your cohort players together, sit in the same place, and play BGMI matches. Any map or match mode works.",
+
+  /* ---------- Season 2 ---------- */
+  // TDM / WOW BATTLEGROUND (WEEK 1 & 2) - Season 2
+  "6a9ae1999dc6f5901f1c5960":
+    "Play at least 15 custom TDM / WOW 4v4 matches with minimum 8 verified players from your cohort by the end of week 1 & 2 phase 2.",
+  // TDM / WOW BATTLEGROUND (WEEK 3 & 4) - Season 2
+  "6a9ae3229dc6f5901f1c5961":
+    "Play at least 15 custom TDM / WOW 4v4 matches with minimum 8 verified players from your cohort by the end of week 3 & 4 phase 2.",
+  // CAPTURE THE CLUTCH - Season 2
+  "6a9c16f3093c4e366e2e623f": "Campus MVPs must create a minimum of 2 original BGMI gameplay Reels.",
+  // OFFLINE ACTIVATION - Season 2
+  "6a9c17bcf4853e9901eeee21":
+    "Campus MVPs must conduct 2 offline BGMI activations during Season 2 at relevant college hotspots (Canteen, Lawns, Classrooms, etc.).",
+  // BOOSTER — SQUAD SIGNUPS - Season 2
+  "6a9e7644647eb524f1eb84d0":
+    "MVPs must continue using their existing Season 1 Google Sheet and create a clear separate section for\nSeason 2 recruits.",
+  // BOOSTER — FLEX - Season 2
+  "6aa9274c1b12d592eaa9a62b":
+    "The FLEX Booster is designed for Campus MVPs to showcase their BGMI Campus MVP identity on campus using the official BGMI Welcome Kit.",
+  // Booster Task - Welcome Kit Unboxing Reel - Season 2
+  "6ab6969da4803c3c7b1b087c":
+    "Unbox your BGMI Campus MVP Welcome Kit and give your audience a glimpse of what’s inside through a creative Instagram Reel.\nShowcase the kit, share your first reactions, and add your personal touch to make the unboxing engaging.",
+  // WOW CHALLENGE - Season 2
+  "6ac0d3becfe49cb80aa65d83":
+    "MVPs and cohort players are required to play the featured WoW maps mentioned below. MANDATORY MAPS\n- 2v2 Garage — 454263\n- Only Shotgun 2v2 — 443262\n- King of School 2v2 — 443259\n- 1v1 M24 Only — 454264",
+  // CLUTCH DIARIES - Season 2
+  "6ac0d9bfc6e5c085e2ee3e9f":
+    "MVPs will capture their best and most exciting moments from the featured WOW Maps and turn them into engaging Instagram Reels.",
+
+  /* ---------- Season 3 ---------- */
+  // Recruit the Squad - Season 3
+  "6ada5d61889b4b59d6e69bde":
+    'Onboard BGMI players from your own campus through the "Your Cohort" section. Add them to a separate Season 3 section in your existing Google Sheet.',
+  // Custom Classic Matches (Week 1 & 2) - Season 3
+  "6ada5dd23bd322bdfd1b2104":
+    "Play at least 10 Custom Classic matches (any map) with a minimum of 11 Verified Cohort players and 1 spectator by the end of Week 1 & 2.",
+  // Custom Classic Matches (Week 3 & 4) - Season 3
+  "6ada5e2ca4d7536c8254a700":
+    "Play another 10 Custom Classic matches (any map) with a minimum of 11 Verified Cohort players and 1 spectator by the end of Week 3 & 4.",
+  // Capture the Clutch - Season 3
+  "6ada5e962da30de8da222e18":
+    "Create at least 2 original BGMI gameplay Reels and publish them on Instagram after POC approval.",
+  // BGMI Campus MVP LinkedIn Post - Season 3
+  "6ada5eeb889b4b59d6e69bdf": "Publish 1 original LinkedIn post about your experience as a BGMI Campus MVP.",
+  // My BGMI MVP Journey (Reel) - Season 3
+  "6ada5f603bd322bdfd1b2105": "Create 1 original Instagram Reel on your journey as a BGMI Campus MVP.",
+  // Booster: KIARAA SHOWDOWN - Season 3
+  "6ae83bbef4a0bf8c4c95e8ec":
+    "Compete in Kiaraa Showdown, deal maximum damage, and give it your best shot!\n\nRemember: Only the MVP's individual damage to Kiaraa will be counted. Damage dealt by your cohort players will not be considered.",
+};
+
 const DEFAULT_SEASON: SeasonNumber = 3;
 
 const NO_DATE_RANGE: DateRange = { from: "", to: "" };
@@ -358,6 +427,7 @@ function buildRows(ambassadors: Ambassador[], submissions: ApiSubmission[]): Row
         uid: amb?.UID != null ? String(amb.UID) : "N/A",
         collegeName: amb?.collegeName ?? "N/A",
         taskName: TASK_NAME_BY_ID.get(getTaskId(s.taskId)) ?? "N/A",
+        taskDescription: TASK_DESCRIPTIONS[getTaskId(s.taskId)] ?? "",
         links,
       };
     })
@@ -390,7 +460,7 @@ function csvCell(value: string | number): string {
 
 // Builds a CSV that mirrors the table exactly as shown on the page
 function downloadCsv(rows: Row[], fileLabel: string) {
-  const header = ["#", "Date", "IGN", "UID", "College", "Task", "Submission Links"];
+  const header = ["#", "Date", "IGN", "UID", "College", "Task", "Task Description", "Submission Links"];
 
   const body = rows.map((r, i) => [
     String(i + 1).padStart(2, "0"),
@@ -400,6 +470,7 @@ function downloadCsv(rows: Row[], fileLabel: string) {
     r.uid,
     r.collegeName,
     r.taskName,
+    r.taskDescription, // line breaks stay inside the quoted cell
     r.links.length === 0 ? "NO LINKS" : r.links.map((l) => l.url).join(" | "),
   ]);
 
@@ -704,6 +775,22 @@ async function downloadDoc(
 
     seasonTasks.forEach((t) => {
       sections.push(para(t.label, { bold: true, size: 23 }));
+
+      // Task description, each "\n" as a new line
+      const description = TASK_DESCRIPTIONS[t.value];
+      if (description) {
+        sections.push(
+          new Paragraph({
+            spacing: { after: 100, line: 300 },
+            children: [
+              new TextRun({ text: "Description: ", bold: true, size: 22 }),
+              ...description
+                .split("\n")
+                .map((line, i) => new TextRun({ text: line, size: 22, break: i > 0 ? 1 : undefined })),
+            ],
+          })
+        );
+      }
 
       if (!t.ok) {
         sections.push(body("Data could not be loaded for this task."));
