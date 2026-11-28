@@ -12,7 +12,7 @@ const API_URL: string =
 // submissions spreadsheet every time the Word report is downloaded. Leave empty to skip.
 const SHEETS_WEBAPP_URL: string =
   import.meta.env.VITE_SHEETS_WEBAPP_URL ??
-  "https://script.google.com/macros/s/AKfycby4rDSzplpZ4mcCbvyrBc84-gPkPHGKBoKbq-VWWcH3yR7auk00R-YxTI8WaG8fi2BU/exec";
+  "https://script.google.com/macros/s/AKfycbyOml6jcWLmu9dMyNIC4jfVJnr0Oh8d-NwGAxUXEb2aaBSOKKUok38neBAyHubzrvHO/exec";
 
 /* ============================================================
    TYPES
@@ -111,6 +111,7 @@ interface SheetSeasonBlock {
   sheetName: string; // tab looked up by name first...
   sheetGid: number | null; // ...then by gid (task tabs are found by gid)
   sheetLabel: string;
+  includeDate: boolean; // false → the Apps Script writes the tab without a Date column
   rows: SheetRow[];
 }
 
@@ -330,6 +331,9 @@ const TASK_SHEET_LINKS: Record<string, string> = {
   "6ae83bbef4a0bf8c4c95e8ec":
     "https://docs.google.com/spreadsheets/d/1JcrQYc9eYf_LalA2rdPHRRvpf9QO_qdJurDLWXqtDbE/edit?gid=1749056249#gid=1749056249",
 };
+
+// Seasons whose sheet tabs (season tab + task tabs) are written without the Date column
+const SEASONS_WITHOUT_SHEET_DATE: SeasonNumber[] = [3];
 
 // Spreadsheet tab each season's submissions are written to
 const SHEET_TAB_NAME: Record<SeasonNumber, string> = {
@@ -582,6 +586,9 @@ function buildSheetPayload(
     .filter((target) => target.tasks.every((d) => d.ok))
     .map((target) => {
       const s = target.season;
+      // Season 3 tab and its task tabs are written without a Date column
+      // (the date range filter still applies to which rows are sent)
+      const includeDate = !SEASONS_WITHOUT_SHEET_DATE.includes(s);
       const rows: SheetRow[] = target.tasks
         .flatMap((t) =>
           t.rows.map((r) => ({
@@ -589,7 +596,7 @@ function buildSheetPayload(
             season: s,
             taskId: t.value,
             task: t.label,
-            date: r.date ? `${formatDate(r.date)} ${formatTime(r.date)}` : r.rawDate || "No date",
+            date: !includeDate ? "" : r.date ? `${formatDate(r.date)} ${formatTime(r.date)}` : r.rawDate || "No date",
             createdAt: r.date ? r.date.toISOString() : "",
             ign: r.ign,
             uid: r.uid,
@@ -607,6 +614,7 @@ function buildSheetPayload(
         sheetName: target.sheetName,
         sheetGid: target.sheetGid,
         sheetLabel: target.label,
+        includeDate,
         rows,
       };
     });
