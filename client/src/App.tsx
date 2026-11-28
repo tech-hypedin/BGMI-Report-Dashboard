@@ -12,7 +12,7 @@ const API_URL: string =
 // submissions spreadsheet every time the Word report is downloaded. Leave empty to skip.
 const SHEETS_WEBAPP_URL: string =
   import.meta.env.VITE_SHEETS_WEBAPP_URL ??
-  "https://script.google.com/macros/s/AKfycbzfu61oUbYGFbBRw31JEFU-rHI3xPlADB9kZIrx9JWRJR84mFkhmA1zloGCsiXW00ky/exec";
+  "https://script.google.com/macros/s/AKfycbyOml6jcWLmu9dMyNIC4jfVJnr0Oh8d-NwGAxUXEb2aaBSOKKUok38neBAyHubzrvHO/exec";
 
 /* ============================================================
    TYPES
@@ -335,6 +335,10 @@ const TASK_SHEET_LINKS: Record<string, string> = {
 // Seasons whose sheet tabs (season tab + task tabs) are written without the Date column
 const SEASONS_WITHOUT_SHEET_DATE: SeasonNumber[] = [3];
 
+// Seasons that are never written to the Google Sheet (no Season 1 / Season 2 tabs).
+// The Word report and CSV for these seasons are unchanged.
+const SEASONS_WITHOUT_SHEET_TABS: SeasonNumber[] = [1, 2];
+
 // Spreadsheet tab each season's submissions are written to
 const SHEET_TAB_NAME: Record<SeasonNumber, string> = {
   1: "Season 1",
@@ -579,10 +583,12 @@ function buildSheetPayload(
   scopeLabel: string,
   dateRange: DateRange
 ): { payload: SheetSyncPayload; skippedTabs: string[] } {
-  const skippedTabs = targets.filter((t) => t.tasks.some((d) => !d.ok)).map((t) => t.sheetName);
+  // Season 1 / Season 2 are not written to the sheet at all
+  const sheetTargets = targets.filter((t) => !SEASONS_WITHOUT_SHEET_TABS.includes(t.season));
+  const skippedTabs = sheetTargets.filter((t) => t.tasks.some((d) => !d.ok)).map((t) => t.sheetName);
 
   // Sent under "seasons" so the deployed Apps Script handles task tabs without changes
-  const seasons: SheetSeasonBlock[] = targets
+  const seasons: SheetSeasonBlock[] = sheetTargets
     .filter((target) => target.tasks.every((d) => d.ok))
     .map((target) => {
       const s = target.season;
@@ -1179,6 +1185,12 @@ export default function App() {
       skippedTabs.length > 0
         ? ` ${skippedTabs.join(", ")} not updated because some task data could not be loaded.`
         : "";
+
+    // Season 1 / Season 2 only: nothing goes to the sheet, the report is all
+    if (payload.seasons.length === 0 && skippedTabs.length === 0) {
+      setExportStatus({ state: "done", message: "Report downloaded." });
+      return;
+    }
 
     if (payload.seasons.length === 0) {
       setExportStatus({
