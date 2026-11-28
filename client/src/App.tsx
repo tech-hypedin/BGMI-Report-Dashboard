@@ -91,7 +91,6 @@ interface TaskData {
 
 // ---- Google Sheet sync payload (contract for the Apps Script doPost) ----
 interface SheetRow {
-  submissionId: string;
   season: SeasonNumber;
   taskId: string;
   task: string;
@@ -598,7 +597,6 @@ function buildSheetPayload(
       const rows: SheetRow[] = target.tasks
         .flatMap((t) =>
           t.rows.map((r) => ({
-            submissionId: r.id,
             season: s,
             taskId: t.value,
             task: t.label,
